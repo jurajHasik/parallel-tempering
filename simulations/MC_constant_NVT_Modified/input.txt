@@ -1,0 +1,12 @@
+test1
+200                  # NSTEP  :  number of steps
+200                  # NEQU   :  number equilibration steps
+20                   # IPRINT :  output interval
+5000                 # ISAVE  :  data save interval
+10                   # IRATIO :  max.displ. update interval
+conf.in
+1.0                  # DENS   :  density in LJ units
+1.0                  # TEMP   :  temperature in LJ units
+3.0                  # RCUT   :  potential cutoff radius in LJ units
+0.5                  # RATIOX :  wanted acceptance ratio
+872445               # SEED   :  random number generator seed 
