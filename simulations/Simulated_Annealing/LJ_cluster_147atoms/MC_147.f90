@@ -7,6 +7,7 @@
 ! ** of the user to test it, if it is to be used in a research application.  **
 ! *****************************************************************************
 
+! Modified by J.Hasik, Dec 2012
 
 ! *****************************************************************************
 ! **                                                                         **
@@ -40,7 +41,7 @@
 !    ** PRINCIPAL VARIABLES:                                          **
 !    **                                                               **
 !    ** INTEGER N                   NUMBER OF MOLECULES               **
-!    ** INTEGER NSTEP               MAXIMUM NUMBER OF CYCLES          **
+!    ** INTEGER NSTEP               MAXIMUM NUMBER OF CYCLES /unused/ **
 !    ** INTEGER NEQU                NUMBER OF EQUILIBRATION CYCLES    **
 !    ** REAL    RX(N),RY(N),RZ(N)   POSITIONS                         **
 !    ** REAL    DENS                REDUCED DENSITY                   **
@@ -85,7 +86,7 @@
 !    ** SUBROUTINE WRITCN ( CNFILE )                                  **
 !    **    WRITES OUT A CONFIGURATION                                 **
 !    ** REAL FUNCTION RANF ( SEED )                                   **
-!    **    RETURNS A UNIFORM RANDOM NUMBER BETWEEN ZERO AND ONE       **
+!    **    RETURNS A UNIFORM RANDOM NUMBER BETWEEN ZERO AND ONE       **SIGMA
 !    ** SUBROUTINE ORDER ( KX, KY, KZ, RHO )                          **
 !    **    RETURNS THE ORDER PARAMETER RHO FOR K-VECTOR (KX,KY,KZ)    **
 !    **                                                               **
@@ -93,19 +94,22 @@
 
         include 'common.f'
 
-        REAL        DRMAX, DENS, TEMP, DENSLJ, SIGMA, RMIN, RCUT, BETA
-        REAL        RANF, ACM, ACATMA, PI, RATIO, SR9, SR3
-        REAL        ACM1
-        REAL        V, VNEW, VOLD, VEND, VN, DELTV, DELTVB, VS
-        REAL        W, WEND, WNEW, WOLD, PRES, DELTW, WS, PS
-        REAL        VLRC, VLRC6, VLRC12, WLRC, WLRC6, WLRC12
-        REAL        RXIOLD, RYIOLD, RZIOLD, RXINEW, RYINEW, RZINEW
-        REAL        AVV, AVP, AVW, ACV, ACP, ACVSQ, ACPSQ, FLV, FLP
-        REAL        KLATX, KLATY, KLATZ, PARAM, AVPARA, AVPASQ, FPAR, PARS
+        REAL*8        DRMAX, DENS, TEMP, DENSLJ, SIGMA, RMIN, RCUT, BETA
+        REAL*8        RANF, ACM, ACATMA, PI, RATIO, SR9, SR3
+        REAL*8        ACM1
+        REAL*8        V, VNEW, VOLD, VEND, VN, DELTV, DELTVB, VS
+        REAL*8        W, WEND, WNEW, WOLD, PRES, DELTW, WS, PS
+        REAL*8        VLRC, VLRC6, VLRC12, WLRC, WLRC6, WLRC12
+        REAL*8        RXIOLD, RYIOLD, RZIOLD, RXINEW, RYINEW, RZINEW
+        REAL*8        AVV, AVP, AVW, ACV, ACP, ACVSQ, ACPSQ, FLV, FLP
+        REAL*8        KLATX, KLATY, KLATZ, PARAM, AVPARA, AVPASQ, FPAR, PARS
         INTEGER     NPARAM
-        REAL        RATIOX
+        REAL*8        RATIOX
         INTEGER     SEED
 
+	INTEGER     TCACC, TCATM
+!		     TCACC - number of accepted moves for current temperature
+!		     TCACC - number of attempted moves for current temperature
         INTEGER     STEP, I, NSTEP, IPRINT, ISAVE, IRATIO
         LOGICAL     OVRLAP
         CHARACTER   TITLE*80, CNFILE*30
@@ -122,8 +126,8 @@
 
         WRITE(*,'('' ENTER THE RUN TITLE                          '')')
         READ (*,'(A)') TITLE
-        WRITE(*,'('' ENTER NUMBER OF CYCLES                       '')')
-        READ (*,*) NSTEP
+!	WRITE(*,'('' ENTER NUMBER OF CYCLES                       '')')
+!	READ (*,*) NSTEP
         WRITE(*,'('' ENTER NUMBER OF EQUILIBRATION CYCLES         '')')
         READ (*,*) NEQU
         WRITE(*,'('' ENTER NUMBER OF STEPS BETWEEN OUTPUT LINES   '')')
@@ -150,7 +154,7 @@
 
         WRITE(*,'(       //1X                    ,A     )') TITLE
         WRITE(*,'('' NUMBER OF ATOMS           '',I10   )') N
-        WRITE(*,'('' NUMBER OF CYCLES          '',I10   )') NSTEP
+!       WRITE(*,'('' NUMBER OF CYCLES          '',I10   )') NSTEP
         WRITE(*,'('' OUTPUT FREQUENCY          '',I10   )') IPRINT
         WRITE(*,'('' SAVE FREQUENCY            '',I10   )') ISAVE
         WRITE(*,'('' RATIO UPDATE FREQUENCY    '',I10   )') IRATIO
@@ -166,6 +170,9 @@
         CALL READCN ( CNFILE )
 
 !    ** CONVERT INPUT DATA TO PROGRAM UNITS **
+
+!	epsilon/K_b = 119.8 K
+!	sigma = 3,41 Ang	
 
         BETA   = 1.0 / TEMP
         SIGMA  = ( DENS / REAL ( N ) ) ** ( 1.0 / 3.0 )
@@ -239,14 +246,16 @@
         WRITE(*,'('' INITIAL ORDER PARM.    =  '', F10.4 )' ) PARS
 
         WRITE(*,'(//'' START OF MARKOV CHAIN               ''//)')
-        WRITE(*,'(''    STEP    NMOVE     RATIO       V/N  '',
-     $            ''          P   ORDERPARAM''/)')
+        WRITE(*,'(''    STEP    NMOVE     RATIO       V/N  '',&
+        '' P   ORDERPARAM''/)')
 
 !    *******************************************************************
 !    ** LOOPS OVER ALL CYCLES AND ALL MOLECULES                       **
 !    *******************************************************************
 
-        DO STEP = 1, NEQU+NSTEP
+	OPEN ( UNIT = 10, FILE = 'conf.xyz', STATUS = 'UNKNOWN' )
+
+        DO STEP = 1, NEQU
 
            IF (STEP.EQ.NEQU) THEN
               WRITE(6,'(20X,''EQUILIBRATION FINISHED '',I10)') STEP 
@@ -361,10 +370,148 @@
         ENDDO
 
 !    *******************************************************************
+!    ** SIMULATED ANNEALING STARTED                                   **
+!    *******************************************************************
+	
+	TCACC = 0
+	TCATM = 0	
+
+	DO WHILE ( TEMP .GT. 0.042 )	
+		
+	   STEP = STEP+1
+
+           DO I = 1, N
+	   
+	      TCATM = TCATM + 1	
+
+              RXIOLD = RX(I)
+              RYIOLD = RY(I)
+              RZIOLD = RZ(I)
+
+!          ** CALCULATE THE ENERGY OF I IN THE OLD CONFIGURATION **
+
+              CALL ENERGY(RXIOLD,RYIOLD,RZIOLD,I,RCUT,SIGMA,VOLD,WOLD)
+
+!          ** MOVE I AND PICKUP THE CENTRAL IMAGE **
+
+              RXINEW = RXIOLD + ( 2.0 * RANF ( SEED ) - 1.0 ) * DRMAX
+              RYINEW = RYIOLD + ( 2.0 * RANF ( SEED ) - 1.0 ) * DRMAX
+              RZINEW = RZIOLD + ( 2.0 * RANF ( SEED ) - 1.0 ) * DRMAX
+
+              RXINEW = RXINEW - ANINT ( RXINEW )
+              RYINEW = RYINEW - ANINT ( RYINEW )
+              RZINEW = RZINEW - ANINT ( RZINEW )
+
+!          ** CALCULATE THE ENERGY OF I IN THE NEW CONFIGURATION **
+
+              CALL ENERGY(RXINEW,RYINEW,RZINEW,I,RCUT,SIGMA,VNEW,WNEW)
+
+!          ** CHECK FOR ACCEPTANCE **
+
+              DELTV  = VNEW - VOLD
+              DELTW  = WNEW - WOLD
+              DELTVB = BETA * DELTV
+
+              IF ( DELTVB .LT. 75.0 ) THEN
+                 IF ( DELTV .LE. 0.0 ) THEN
+                    V      = V + DELTV
+                    W      = W + DELTW
+                    RX(I)  = RXINEW
+                    RY(I)  = RYINEW
+                    RZ(I)  = RZINEW
+                    ACATMA = ACATMA + 1.0
+		    TCACC = TCACC + 1
+                 ELSEIF ( EXP ( - DELTVB ) .GT. RANF ( SEED ) ) THEN
+                    V      = V + DELTV
+                    W      = W + DELTW
+                    RX(I)  = RXINEW
+                    RY(I)  = RYINEW
+                    RZ(I)  = RZINEW
+                    ACATMA = ACATMA + 1.0
+		    TCACC = TCACC + 1
+                 ENDIF
+              ENDIF
+
+              ACM = ACM + 1.0
+
+!          ** CALCULATE INSTANTANEOUS VALUES **
+
+              VN     = ( V + VLRC ) / REAL ( N )
+              PRES   = DENS * TEMP + W + WLRC
+
+!          ** CONVERT PRESSURE TO LJ UNITS **
+
+              PRES   = PRES * SIGMA ** 3
+
+!          ** ACCUMULATE AVERAGES **
+
+              IF (STEP.GT.NEQU) THEN
+                 ACM1   = ACM1  + 1.0
+                 ACV    = ACV   + VN
+                 ACP    = ACP   + PRES
+                 ACVSQ  = ACVSQ + VN * VN
+                 ACPSQ  = ACPSQ + PRES * PRES
+              ENDIF
+
+!          *************************************************************
+!          ** ENDS LOOP OVER ATOMS                                    **
+!          *************************************************************
+
+           ENDDO
+
+!      ** CALCULATE ORDER PARAMETER **
+
+           CALL ORDER ( KLATX, KLATY, KLATZ, PARAM )
+           IF (STEP.GT.NEQU) THEN
+              AVPARA=AVPARA+PARAM
+              AVPASQ=AVPASQ+PARAM*PARAM
+              NPARAM=NPARAM+1
+           ENDIF
+
+!       ** PERFORM PERIODIC OPERATIONS  **
+
+           !IF ( MOD ( STEP, IRATIO ) .EQ. 0 ) THEN
+!          ** ADJUST MAXIMUM DISPLACEMENT **
+           !   RATIO = ACATMA / REAL ( N * IRATIO )
+           !   IF ( RATIO .GT. RATIOX ) THEN
+           !      DRMAX  = DRMAX  * 1.05
+           !   ELSE
+           !      DRMAX  = DRMAX  * 0.95
+           !   ENDIF
+           !   ACATMA = 0.0
+           !ENDIF
+
+           IF ( MOD ( STEP, IPRINT ) .EQ. 0 ) THEN
+!          ** WRITE OUT RUNTIME INFORMATION **
+              WRITE(*,'(2I8,3F12.6,3I8)') STEP,INT(ACM), RATIO, VN, PRES
+           ENDIF
+           IF ( MOD ( STEP, ISAVE ) .EQ. 0 ) THEN
+!          ** WRITE OUT THE CONFIGURATION AT INTERVALS **
+              CALL WRITCN ( CNFILE )
+           ENDIF
+
+	   IF ( TCACC .GT. 10000) THEN
+!	   ** SET NEW TEMPERATURE AND RESET TCACC, TCATM **
+		TCACC = 0
+		TCATM = 0
+		TEMP = TEMP*0.99
+		BETA = BETA / 0.99
+	   ENDIF
+	   IF ( TCATM .EQ. 100000) THEN
+!	   ** SET NEW TEMPERATURE AND RESET TCACC, TCATM **
+		TCACC = 0
+		TCATM = 0
+		TEMP = TEMP*0.99
+		BETA = BETA / 0.99
+	   ENDIF
+	   	
+!    *******************************************************************
 !    ** ENDS THE LOOP OVER CYCLES                                     **
 !    *******************************************************************
 
-        WRITE(*,'(//'' END OF MARKOV CHAIN          ''//)')
+        ENDDO     	  	   
+        
+	WRITE(*,'(//'' END OF SIMULATED ANNEALING         ''//)')
 
 !    ** CHECKS FINAL VALUE OF THE POTENTIAL ENERGY IS CONSISTENT **
 
@@ -381,6 +528,8 @@
 !    ** WRITE OUT THE FINAL CONFIGURATION FROM THE RUN **
 
         CALL WRITCN ( CNFILE )
+
+	CLOSE ( UNIT = 10 )
 
 !    ** CALCULATE AND WRITE OUT RUNNING AVERAGES **
 
@@ -437,11 +586,11 @@
 
         include 'common.f'
 
-        REAL        SIGMA, RMIN, RCUT, V, W
+        REAL*8        SIGMA, RMIN, RCUT, V, W
         LOGICAL     OVRLAP
 
-        REAL        RCUTSQ, RMINSQ, SIGSQ, RXIJ, RYIJ, RZIJ
-        REAL        RXI, RYI, RZI, VIJ, WIJ, SR2, SR6, RIJSQ
+        REAL*8        RCUTSQ, RMINSQ, SIGSQ, RXIJ, RYIJ, RZIJ
+        REAL*8        RXI, RYI, RZI, VIJ, WIJ, SR2, SR6, RIJSQ
         INTEGER     I, J
 
 !    *******************************************************************
@@ -515,11 +664,11 @@
 
         include 'common.f'
 
-        REAL        RCUT, SIGMA, RXI, RYI, RZI, V, W
+        REAL*8        RCUT, SIGMA, RXI, RYI, RZI, V, W
         INTEGER     I
 
-        REAL        RCUTSQ, SIGSQ, SR2, SR6
-        REAL        RXIJ, RYIJ, RZIJ, RIJSQ, VIJ, WIJ
+        REAL*8        RCUTSQ, SIGSQ, SR2, SR6
+        REAL*8        RXIJ, RYIJ, RZIJ, RIJSQ, VIJ, WIJ
         INTEGER     J
 
 !     ******************************************************************
@@ -560,7 +709,7 @@
 
 
 
-      REAL FUNCTION RANF(IX)
+      REAL*8 FUNCTION RANF(IX)
 !     ---------------------------
 !     Random number generator
 !     uniform distribution [0,1[
@@ -631,15 +780,16 @@
 
 !   ********************************************************************
 
-        OPEN ( UNIT = CNUNIT, FILE = 'conf.sav', STATUS = 'UNKNOWN' )
+  !      OPEN ( UNIT = CNUNIT, FILE = 'conf.xyz', STATUS = 'UNKNOWN' )
 
 
         WRITE ( CNUNIT,* ) N
+	WRITE ( CNUNIT,* ) 
         DO I=1,N
-           WRITE ( CNUNIT,* ) RX(I), RY(I), RZ(I)
+           WRITE ( CNUNIT,* ) 'Ar ', RX(I), RY(I), RZ(I)
         ENDDO
 
-        CLOSE ( UNIT = CNUNIT )
+ !       CLOSE ( UNIT = CNUNIT )
 
         RETURN
         END
@@ -683,10 +833,10 @@
 
         include 'common.f'
 
-        REAL        KLATX, KLATY, KLATZ, PARAM
+        REAL*8        KLATX, KLATY, KLATZ, PARAM
 
         INTEGER     I
-        REAL        SINSUM, COSSUM
+        REAL*8        SINSUM, COSSUM
 
 !    *******************************************************************
 
