@@ -110,7 +110,7 @@
 	INTEGER     TCACC, TCATM
 !		     TCACC - number of accepted moves for current temperature
 !		     TCACC - number of attempted moves for current temperature
-        INTEGER     STEP, I, NSTEP, IPRINT, ISAVE, IRATIO
+        INTEGER     STEP, I, NSTEP, IPRINT, ISAVE
         LOGICAL     OVRLAP
         CHARACTER   TITLE*80, CNFILE*30
 
@@ -134,8 +134,8 @@
         READ (*,*) IPRINT
         WRITE(*,'('' ENTER NUMBER OF STEPS BETWEEN DATA SAVES     '')')
         READ (*,*) ISAVE
-        WRITE(*,'('' ENTER INTERVAL FOR UPDATE OF MAX. DISPL.     '')')
-        READ (*,*) IRATIO
+        !WRITE(*,'('' ENTER INTERVAL FOR UPDATE OF MAX. DISPL.     '')')
+        !READ (*,*) IRATIO
         WRITE(*,'('' ENTER THE CONFIGURATION FILE NAME            '')')
         READ (*,'(A)') CNFILE
         WRITE(*,'('' ENTER THE FOLLOWING IN LENNARD-JONES UNITS '',/)')
@@ -157,7 +157,7 @@
 !       WRITE(*,'('' NUMBER OF CYCLES          '',I10   )') NSTEP
         WRITE(*,'('' OUTPUT FREQUENCY          '',I10   )') IPRINT
         WRITE(*,'('' SAVE FREQUENCY            '',I10   )') ISAVE
-        WRITE(*,'('' RATIO UPDATE FREQUENCY    '',I10   )') IRATIO
+        !WRITE(*,'('' RATIO UPDATE FREQUENCY    '',I10   )') IRATIO
         WRITE(*,'('' RANDOM NUMBER GEN. SEED   '',I10   )') SEED
         WRITE(*,'('' CONFIGURATION FILE  NAME  '',A     )') CNFILE
         WRITE(*,'('' TEMPERATURE               '',F10.4 )') TEMP
@@ -248,18 +248,17 @@
         WRITE(*,'(//'' START OF MARKOV CHAIN               ''//)')
         WRITE(*,'(''    STEP    NMOVE     RATIO       V/N  '',&
         '' P   ORDERPARAM''/)')
+        
+!    ** INITIALIZE RANDOM NUMBER GENERATOR **
+        CALL ZBQLINI ( SEED )
 
 !    *******************************************************************
 !    ** LOOPS OVER ALL CYCLES AND ALL MOLECULES                       **
 !    *******************************************************************
 
-	OPEN ( UNIT = 10, FILE = 'conf.xyz', STATUS = 'UNKNOWN' )
+	OPEN ( UNIT = 11, FILE = 'conf.xyz', STATUS = 'UNKNOWN' )
 
         DO STEP = 1, NEQU
-
-           IF (STEP.EQ.NEQU) THEN
-              WRITE(6,'(20X,''EQUILIBRATION FINISHED '',I10)') STEP 
-           ENDIF
 
            DO I = 1, N
 
@@ -273,9 +272,9 @@
 
 !          ** MOVE I AND PICKUP THE CENTRAL IMAGE **
 
-              RXINEW = RXIOLD + ( 2.0 * RANF ( SEED ) - 1.0 ) * DRMAX
-              RYINEW = RYIOLD + ( 2.0 * RANF ( SEED ) - 1.0 ) * DRMAX
-              RZINEW = RZIOLD + ( 2.0 * RANF ( SEED ) - 1.0 ) * DRMAX
+              RXINEW = RXIOLD + ( 2.0 * ZBQLU01(DUMMY) - 1.0 ) * DRMAX
+              RYINEW = RYIOLD + ( 2.0 * ZBQLU01(DUMMY) - 1.0 ) * DRMAX
+              RZINEW = RZIOLD + ( 2.0 * ZBQLU01(DUMMY) - 1.0 ) * DRMAX
 
               RXINEW = RXINEW - ANINT ( RXINEW )
               RYINEW = RYINEW - ANINT ( RYINEW )
@@ -299,7 +298,7 @@
                     RY(I)  = RYINEW
                     RZ(I)  = RZINEW
                     ACATMA = ACATMA + 1.0
-                 ELSEIF ( EXP ( - DELTVB ) .GT. RANF ( SEED ) ) THEN
+                 ELSEIF ( EXP ( - DELTVB ) .GT. ZBQLU01(DUMMY) ) THEN
                     V      = V + DELTV
                     W      = W + DELTW
                     RX(I)  = RXINEW
@@ -347,16 +346,16 @@
 
 !       ** PERFORM PERIODIC OPERATIONS  **
 
-           IF ( MOD ( STEP, IRATIO ) .EQ. 0 ) THEN
+           !IF ( MOD ( STEP, IRATIO ) .EQ. 0 ) THEN
 !          ** ADJUST MAXIMUM DISPLACEMENT **
-              RATIO = ACATMA / REAL ( N * IRATIO )
-              IF ( RATIO .GT. RATIOX ) THEN
-                 DRMAX  = DRMAX  * 1.05
-              ELSE
-                 DRMAX  = DRMAX  * 0.95
-              ENDIF
-              ACATMA = 0.0
-           ENDIF
+           !   RATIO = ACATMA / REAL ( N * IRATIO )
+            !  IF ( RATIO .GT. RATIOX ) THEN
+            !     DRMAX  = DRMAX  * 1.05
+            !  ELSE
+            !     DRMAX  = DRMAX  * 0.95
+            !  ENDIF
+            !  ACATMA = 0.0
+          ! ENDIF
 
            IF ( MOD ( STEP, IPRINT ) .EQ. 0 ) THEN
 !          ** WRITE OUT RUNTIME INFORMATION **
@@ -369,15 +368,17 @@
 
         ENDDO
 
+        WRITE(6,'(20X,''EQUILIBRATION FINISHED '',I10)') STEP 
+   
 !    *******************************************************************
 !    ** SIMULATED ANNEALING STARTED                                   **
 !    *******************************************************************
 	
 	TCACC = 0
-	TCATM = 0	
+	TCATM = 0
 
-	DO WHILE ( TEMP .GT. 0.042 )	
-		
+        DO WHILE ( TEMP .GT. 0.042 )	
+	
 	   STEP = STEP+1
 
            DO I = 1, N
@@ -394,9 +395,9 @@
 
 !          ** MOVE I AND PICKUP THE CENTRAL IMAGE **
 
-              RXINEW = RXIOLD + ( 2.0 * RANF ( SEED ) - 1.0 ) * DRMAX
-              RYINEW = RYIOLD + ( 2.0 * RANF ( SEED ) - 1.0 ) * DRMAX
-              RZINEW = RZIOLD + ( 2.0 * RANF ( SEED ) - 1.0 ) * DRMAX
+              RXINEW = RXIOLD + ( 2.0 * ZBQLU01(DUMMY) - 1.0 ) * DRMAX
+              RYINEW = RYIOLD + ( 2.0 * ZBQLU01(DUMMY) - 1.0 ) * DRMAX
+              RZINEW = RZIOLD + ( 2.0 * ZBQLU01(DUMMY) - 1.0 ) * DRMAX
 
               RXINEW = RXINEW - ANINT ( RXINEW )
               RYINEW = RYINEW - ANINT ( RYINEW )
@@ -421,7 +422,7 @@
                     RZ(I)  = RZINEW
                     ACATMA = ACATMA + 1.0
 		    TCACC = TCACC + 1
-                 ELSEIF ( EXP ( - DELTVB ) .GT. RANF ( SEED ) ) THEN
+                 ELSEIF ( EXP ( - DELTVB ) .GT. ZBQLU01(DUMMY) ) THEN
                     V      = V + DELTV
                     W      = W + DELTW
                     RX(I)  = RXINEW
@@ -483,26 +484,26 @@
 
            IF ( MOD ( STEP, IPRINT ) .EQ. 0 ) THEN
 !          ** WRITE OUT RUNTIME INFORMATION **
-              WRITE(*,'(2I8,3F12.6,3I8)') STEP,INT(ACM), RATIO, VN, PRES
+              WRITE(*,'(2I8,3F12.6,3I8)') STEP,INT(ACM), RATIO, VN, PRES, TEMP
            ENDIF
            IF ( MOD ( STEP, ISAVE ) .EQ. 0 ) THEN
 !          ** WRITE OUT THE CONFIGURATION AT INTERVALS **
               CALL WRITCN ( CNFILE )
            ENDIF
 
-	   IF ( TCACC .GT. 10000) THEN
+	   IF ( TCACC .GT. 100000) THEN
 !	   ** SET NEW TEMPERATURE AND RESET TCACC, TCATM **
 		TCACC = 0
 		TCATM = 0
-		TEMP = TEMP*0.99
-		BETA = BETA / 0.99
+		TEMP = TEMP*0.996
+		BETA = BETA / 0.996
 	   ENDIF
-	   IF ( TCATM .EQ. 100000) THEN
+	   IF ( TCATM .EQ. 500000) THEN
 !	   ** SET NEW TEMPERATURE AND RESET TCACC, TCATM **
 		TCACC = 0
 		TCATM = 0
-		TEMP = TEMP*0.99
-		BETA = BETA / 0.99
+		TEMP = TEMP*0.996
+		BETA = BETA / 0.996
 	   ENDIF
 	   	
 !    *******************************************************************
@@ -529,7 +530,7 @@
 
         CALL WRITCN ( CNFILE )
 
-	CLOSE ( UNIT = 10 )
+	CLOSE ( UNIT = 11 )
 
 !    ** CALCULATE AND WRITE OUT RUNNING AVERAGES **
 
@@ -707,29 +708,262 @@
         RETURN
         END
 
+	REAL*8 FUNCTION RANF(IX)
+        RANF = ZBQLU01 ( DUMMY )
+        RETURN
+        END
+        
 
-
-      REAL*8 FUNCTION RANF(IX)
+!      REAL*8 FUNCTION RANF(IX)
 !     ---------------------------
 !     Random number generator
 !     uniform distribution [0,1[
 !     ix = seed < jj
 !     ---------------------------
-      INTEGER IX, II, JJ
-      INTEGER K1, I1, I2
-      DOUBLE PRECISION P
-      PARAMETER (II=127773,JJ=2147483647)
-      PARAMETER (I1=16807,I2=2836,P=4.656612875D-10)
+!      INTEGER IX, II, JJ
+!      INTEGER K1, I1, I2
+!      DOUBLE PRECISION P
+!      PARAMETER (II=127773,JJ=2147483647)
+!      PARAMETER (I1=16807,I2=2836,P=4.656612875D-10)
       
-      IX = I1*MOD(IX,II) - IX/II*I2
-      IF ( IX .LT. 0) IX = IX + JJ
-      RANF = IX * P
-      RETURN
+!      IX = I1*MOD(IX,II) - IX/II*I2
+!      IF ( IX .LT. 0) IX = IX + JJ
+!      RANF = IX * P
+!      RETURN
+!      END
+      
+!	RANDOM NUMBER GENERATOR
+
+! *******************************************************************
+! ********	FILE: randgen.f				***********
+! ********	AUTHORS: Richard Chandler		***********
+! ********		 (richard@stats.ucl.ac.uk)	***********
+! ********		 Paul Northrop 			***********
+! ********		 (northrop@stats.ox.ac.uk)	***********
+! ********	LAST MODIFIED: 26/8/03			***********
+! ********	See file randgen.txt for details	***********
+! *******************************************************************
+
+      BLOCK DATA ZBQLBD01
+
+!*       Initializes seed array etc. for random number generator.
+!*       The values below have themselves been generated using the
+!*       NAG generator.
+
+      COMMON /ZBQL0001/ ZBQLIX,B,C
+      DOUBLE PRECISION ZBQLIX(43),B,C
+      INTEGER I
+      DATA (ZBQLIX(I),I=1,43) /8.001441D7,5.5321801D8,&
+     &1.69570999D8,2.88589940D8,2.91581871D8,1.03842493D8,&
+     &7.9952507D7,3.81202335D8,3.11575334D8,4.02878631D8,&
+     &2.49757109D8,1.15192595D8,2.10629619D8,3.99952890D8,&
+     &4.12280521D8,1.33873288D8,7.1345525D7,2.23467704D8,&
+     &2.82934796D8,9.9756750D7,1.68564303D8,2.86817366D8,&
+     &1.14310713D8,3.47045253D8,9.3762426D7 ,1.09670477D8,&
+     &3.20029657D8,3.26369301D8,9.441177D6,3.53244738D8,&
+     &2.44771580D8,1.59804337D8,2.07319904D8,3.37342907D8,&
+     &3.75423178D8,7.0893571D7 ,4.26059785D8,3.95854390D8,&
+     &2.0081010D7,5.9250059D7,1.62176640D8,3.20429173D8,&
+     &2.63576576D8/
+      DATA B / 4.294967291D9 /
+      DATA C / 0.0D0 /
+      END
+!******************************************************************
+!******************************************************************
+!******************************************************************
+      SUBROUTINE ZBQLINI(SEED)
+!******************************************************************
+!*       To initialize the random number generator - either
+!*       repeatably or nonrepeatably. Need double precision
+!*       variables because integer storage can't handle the
+!*       numbers involved
+!******************************************************************
+!*	ARGUMENTS
+!*	=========
+!*	SEED	(integer, input). User-input number which generates
+!*		elements of the array ZBQLIX, which is subsequently used 
+!*		in the random number generation algorithm. If SEED=0,
+!*		the array is seeded using the system clock if the 
+!*		FORTRAN implementation allows it.
+!******************************************************************
+!*	PARAMETERS
+!*	==========
+!*	LFLNO	(integer). Number of lowest file handle to try when
+!*		opening a temporary file to copy the system clock into.
+!*		Default is 80 to keep out of the way of any existing
+!*		open files (although the program keeps searching till
+!*		it finds an available handle). If this causes problems,
+!*               (which will only happen if handles 80 through 99 are 
+!*               already in use), decrease the default value.
+!******************************************************************
+      INTEGER LFLNO
+      PARAMETER (LFLNO=80)
+!******************************************************************
+!*	VARIABLES
+!*	=========
+!*	SEED	See above
+!*	ZBQLIX	Seed array for the random number generator. Defined
+!*		in ZBQLBD01
+!*	B,C	Used in congruential initialisation of ZBQLIX
+!*	SS,MM,}	System clock secs, mins, hours and days
+!*	HH,DD }
+!*	FILNO	File handle used for temporary file
+!*	INIT	Indicates whether generator has already been initialised
+
+      INTEGER SEED,SS,MM,HH,DD,FILNO,I
+      INTEGER INIT
+      DOUBLE PRECISION ZBQLIX(43),B,C
+      DOUBLE PRECISION TMPVAR1,DSS,DMM,DHH,DDD
+
+      COMMON /ZBQL0001/ ZBQLIX,B,C
+      SAVE INIT
+
+!*	Ensure we don't call this more than once in a program
+
+      IF (INIT.GE.1) THEN
+       IF(INIT.EQ.1) THEN
+        WRITE(*,1)
+        INIT = 2
+       ENDIF
+       RETURN
+      ELSE
+       INIT = 1
+      ENDIF
+
+!*       If SEED = 0, cat the contents of the clock into a file
+!*       and transform to obtain ZQBLIX(1), then use a congr.
+!*       algorithm to set remaining elements. Otherwise take
+!*       specified value of SEED.
+
+!*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+!*>>>>>>>	NB FOR SYSTEMS WHICH DO NOT SUPPORT THE  >>>>>>>
+!*>>>>>>>	(NON-STANDARD) 'CALL SYSTEM' COMMAND,    >>>>>>>
+!*>>>>>>>	THIS WILL NOT WORK, AND THE FIRST CLAUSE >>>>>>>
+!*>>>>>>>	OF THE FOLLOWING IF BLOCK SHOULD BE	 >>>>>>>
+!*>>>>>>>	COMMENTED OUT.				 >>>>>>>
+!*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      IF (SEED.EQ.0) THEN
+!*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+!*>>>>>>>	COMMENT OUT FROM HERE IF YOU DON'T HAVE  >>>>>>>
+!*>>>>>>>	'CALL SYSTEM' CAPABILITY ...		 >>>>>>>
+!*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+       CALL SYSTEM(' date +%S%M%H%j > zbql1234.tmp')
+
+!*       Try all file numbers for LFLNO to 999 
+
+       FILNO = LFLNO
+ 10    OPEN(FILNO,FILE='zbql1234.tmp',ERR=11)
+       GOTO 12
+ 11    FILNO = FILNO + 1
+       IF (FILNO.GT.999) THEN
+        WRITE(*,2)
+        RETURN
+       ENDIF
+       GOTO 10
+ 12    READ(FILNO,'(3(I2),I3)') SS,MM,HH,DD
+       CLOSE(FILNO)
+       CALL SYSTEM('rm zbql1234.tmp')
+       DSS = DINT((DBLE(SS)/6.0D1) * B)
+       DMM = DINT((DBLE(MM)/6.0D1) * B)
+       DHH = DINT((DBLE(HH)/2.4D1) * B)
+       DDD = DINT((DBLE(DD)/3.65D2) * B)
+       TMPVAR1 = DMOD(DSS+DMM+DHH+DDD,B)
+
+!<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+!<<<<<<<<	... TO HERE (END OF COMMENTING OUT FOR 	  <<<<<<<
+!<<<<<<<<	USERS WITHOUT 'CALL SYSTEM' CAPABILITY	  <<<<<<<
+!<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+      ELSE
+       TMPVAR1 = DMOD(DBLE(SEED),B)
+      ENDIF
+      ZBQLIX(1) = TMPVAR1
+      DO 100 I = 2,43
+       TMPVAR1 = ZBQLIX(I-1)*3.0269D4
+       TMPVAR1 = DMOD(TMPVAR1,B)       
+       ZBQLIX(I) = TMPVAR1
+ 100  CONTINUE
+
+ 1    FORMAT(//5X,'****WARNING**** You have called routine ZBQLINI ',&
+     &'more than',/5X,'once. I''m ignoring any subsequent calls.',//)
+ 2    FORMAT(//5X,'**** ERROR **** In routine ZBQLINI, I couldn''t',&
+     &' find an',/5X,&
+     &'available file number. To rectify the problem, decrease the ',&
+     &'value of',/5X,&
+     &'the parameter LFLNO at the start of this routine (in file ',&
+     &'randgen.f)',/5X,&
+     &'and recompile. Any number less than 100 should work.')
       END
       
+!*****************************************************************
+      FUNCTION ZBQLU01(DUMMY)
 
+!*       Returns a uniform random number between 0 & 1, using
+!*       a Marsaglia-Zaman type subtract-with-borrow generator.
+!*       Uses double precision, rather than integer, arithmetic 
+!*       throughout because MZ's integer constants overflow
+!*       32-bit integer storage (which goes from -2^31 to 2^31).
+!*       Ideally, we would explicitly truncate all integer 
+!*       quantities at each stage to ensure that the double
+!*       precision representations do not accumulate approximation
+!*       error; however, on some machines the use of DNINT to
+!*       accomplish this is *seriously* slow (run-time increased
+!*       by a factor of about 3). This double precision version 
+!*       has been tested against an integer implementation that
+!*       uses long integers (non-standard and, again, slow) -
+!*       the output was identical up to the 16th decimal place
+!*       after 10^10 calls, so we're probably OK ...
 
+      DOUBLE PRECISION ZBQLU01,DUMMY,B,C,ZBQLIX(43),X,B2,BINV
+      INTEGER CURPOS,ID22,ID43
 
+      COMMON /ZBQL0001/ ZBQLIX,B,C
+      SAVE /ZBQL0001/
+      SAVE CURPOS,ID22,ID43
+      DATA CURPOS,ID22,ID43 /1,22,43/
+
+      B2 = B
+      BINV = 1.0D0/B
+ 5    X = ZBQLIX(ID22) - ZBQLIX(ID43) - C
+      IF (X.LT.0.0D0) THEN
+       X = X + B
+       C = 1.0D0
+      ELSE
+       C = 0.0D0
+      ENDIF
+      ZBQLIX(ID43) = X
+
+!*     Update array pointers. Do explicit check for bounds of each to
+!*     avoid expense of modular arithmetic. If one of them is 0 the others
+!*     won't be
+
+      CURPOS = CURPOS - 1
+      ID22 = ID22 - 1
+      ID43 = ID43 - 1
+      IF (CURPOS.EQ.0) THEN
+       CURPOS=43
+      ELSEIF (ID22.EQ.0) THEN
+       ID22 = 43
+      ELSEIF (ID43.EQ.0) THEN
+       ID43 = 43
+      ENDIF
+
+!*     The integer arithmetic there can yield X=0, which can cause 
+!*     problems in subsequent routines (e.g. ZBQLEXP). The problem
+!*     is simply that X is discrete whereas U is supposed to 
+!*     be continuous - hence if X is 0, go back and generate another
+!*     X and return X/B^2 (etc.), which will be uniform on (0,1/B). 
+
+      IF (X.LT.BINV) THEN
+       B2 = B2*B
+       GOTO 5
+      ENDIF
+
+      ZBQLU01 = X/B2
+
+      END
+
+!***********************************************************************
 
         SUBROUTINE READCN ( CNFILE )
 
@@ -775,7 +1009,7 @@
 
         CHARACTER   CNFILE*(*)
         INTEGER     CNUNIT
-        PARAMETER ( CNUNIT = 10 )
+        PARAMETER ( CNUNIT = 11 )
         INTEGER I
 
 !   ********************************************************************
