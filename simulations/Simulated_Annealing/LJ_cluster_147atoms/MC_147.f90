@@ -96,7 +96,7 @@
 
         REAL*8        DRMAX, DENS, TEMP, DENSLJ, SIGMA, RMIN, RCUT, BETA
         REAL*8        RANF, ACM, ACATMA, PI, RATIO, SR9, SR3
-        REAL*8        ACM1
+        REAL*8        ACM1, DUMM, ZBQLU01
         REAL*8        V, VNEW, VOLD, VEND, VN, DELTV, DELTVB, VS
         REAL*8        W, WEND, WNEW, WOLD, PRES, DELTW, WS, PS
         REAL*8        VLRC, VLRC6, VLRC12, WLRC, WLRC6, WLRC12
@@ -104,7 +104,6 @@
         REAL*8        AVV, AVP, AVW, ACV, ACP, ACVSQ, ACPSQ, FLV, FLP
         REAL*8        KLATX, KLATY, KLATZ, PARAM, AVPARA, AVPASQ, FPAR, PARS
         INTEGER     NPARAM
-        REAL*8        RATIOX
         INTEGER     SEED
 
 	INTEGER     TCACC, TCATM
@@ -115,6 +114,7 @@
         CHARACTER   TITLE*80, CNFILE*30
 
         PARAMETER ( PI = 3.1415927 )
+	PARAMETER ( DUMM = 1.0 )
 
 !       ****************************************************************
 
@@ -126,16 +126,12 @@
 
         WRITE(*,'('' ENTER THE RUN TITLE                          '')')
         READ (*,'(A)') TITLE
-!	WRITE(*,'('' ENTER NUMBER OF CYCLES                       '')')
-!	READ (*,*) NSTEP
         WRITE(*,'('' ENTER NUMBER OF EQUILIBRATION CYCLES         '')')
         READ (*,*) NEQU
         WRITE(*,'('' ENTER NUMBER OF STEPS BETWEEN OUTPUT LINES   '')')
         READ (*,*) IPRINT
         WRITE(*,'('' ENTER NUMBER OF STEPS BETWEEN DATA SAVES     '')')
         READ (*,*) ISAVE
-        !WRITE(*,'('' ENTER INTERVAL FOR UPDATE OF MAX. DISPL.     '')')
-        !READ (*,*) IRATIO
         WRITE(*,'('' ENTER THE CONFIGURATION FILE NAME            '')')
         READ (*,'(A)') CNFILE
         WRITE(*,'('' ENTER THE FOLLOWING IN LENNARD-JONES UNITS '',/)')
@@ -145,8 +141,6 @@
         READ (*,*) TEMP
         WRITE(*,'('' ENTER THE POTENTIAL CUTOFF DISTANCE          '')')
         READ (*,*) RCUT
-        WRITE(*,'('' ENTER THE WANTED ACCEPTANCE RATIO            '')')
-        READ (*,*) RATIOX
         WRITE(*,'('' RANDOM NUMBER GENERATOR SEED                 '')')
         READ (*,*) SEED
 
@@ -154,16 +148,13 @@
 
         WRITE(*,'(       //1X                    ,A     )') TITLE
         WRITE(*,'('' NUMBER OF ATOMS           '',I10   )') N
-!       WRITE(*,'('' NUMBER OF CYCLES          '',I10   )') NSTEP
         WRITE(*,'('' OUTPUT FREQUENCY          '',I10   )') IPRINT
         WRITE(*,'('' SAVE FREQUENCY            '',I10   )') ISAVE
-        !WRITE(*,'('' RATIO UPDATE FREQUENCY    '',I10   )') IRATIO
         WRITE(*,'('' RANDOM NUMBER GEN. SEED   '',I10   )') SEED
         WRITE(*,'('' CONFIGURATION FILE  NAME  '',A     )') CNFILE
         WRITE(*,'('' TEMPERATURE               '',F10.4 )') TEMP
         WRITE(*,'('' DENSITY                   '',F10.4 )') DENS
         WRITE(*,'('' POTENTIAL CUTOFF          '',F10.4 )') RCUT
-        WRITE(*,'('' WANTED ACCEPTANCE RATIO   '',F10.4 )') RATIOX
 
 !    ** READ INITIAL CONFIGURATION **
 
@@ -209,23 +200,23 @@
 !    ** CALCULATE LONG RANGE CORRECTIONS    **
 !    ** SPECIFIC TO THE LENNARD JONES FLUID **
 
-        SR3 = ( SIGMA / RCUT ) ** 3
-        SR9 = SR3 ** 3
+        !SR3 = ( SIGMA / RCUT ) ** 3
+        !SR9 = SR3 ** 3
 
-        VLRC12 =   8.0 * PI * DENSLJ * REAL ( N ) * SR9 / 9.0
-        VLRC6  = - 8.0 * PI * DENSLJ * REAL ( N ) * SR3 / 3.0
-        VLRC   =   VLRC12 + VLRC6
-        WLRC12 =   4.0  * VLRC12
-        WLRC6  =   2.0  * VLRC6
-        WLRC   =   WLRC12 + WLRC6
+        !VLRC12 =   8.0 * PI * DENSLJ * REAL ( N ) * SR9 / 9.0
+        !VLRC6  = - 8.0 * PI * DENSLJ * REAL ( N ) * SR3 / 3.0
+        !VLRC   =   VLRC12 + VLRC6
+        !WLRC12 =   4.0  * VLRC12
+        !WLRC6  =   2.0  * VLRC6
+        !WLRC   =   WLRC12 + WLRC6
 
 !    ** WRITE OUT SOME USEFUL INFORMATION **
 
         WRITE(*,'('' SIGMA/BOX              =  '',F10.4)')  SIGMA
         WRITE(*,'('' RMIN/BOX               =  '',F10.4)')  RMIN
         WRITE(*,'('' RCUT/BOX               =  '',F10.4)')  RCUT
-        WRITE(*,'('' LRC FOR <V>            =  '',F10.4)')  VLRC
-        WRITE(*,'('' LRC FOR <W>            =  '',F10.4)')  WLRC
+        !WRITE(*,'('' LRC FOR <V>            =  '',F10.4)')  VLRC
+        !WRITE(*,'('' LRC FOR <W>            =  '',F10.4)')  WLRC
 
 !    ** CALCULATE INITIAL ENERGY AND CHECK FOR OVERLAPS **
 
@@ -235,9 +226,13 @@
 
         CALL ORDER ( KLATX, KLATY, KLATZ, PARS )
 
-        VS = ( V + VLRC ) / REAL ( N )
-        WS = ( W + WLRC ) / REAL ( N )
-        PS = DENS * TEMP + W + WLRC
+        !VS = ( V + VLRC ) / REAL ( N )
+        !WS = ( W + WLRC ) / REAL ( N )
+        !PS = DENS * TEMP + W + WLRC
+        !PS = PS * SIGMA ** 3
+	VS = ( V ) / REAL ( N )
+        WS = ( W ) / REAL ( N )
+        PS = DENS * TEMP + W
         PS = PS * SIGMA ** 3
 
         WRITE(*,'('' INITIAL V              =  '', F10.4 )' ) VS
@@ -249,8 +244,8 @@
         WRITE(*,'(''    STEP    NMOVE     RATIO       V/N  '',&
         '' P   ORDERPARAM''/)')
         
-!    ** INITIALIZE RANDOM NUMBER GENERATOR **
-        CALL ZBQLINI ( SEED )
+!    ** INITIALIZE RANDOM NUMBER GENERATOR **        
+	CALL ZBQLINI ( SEED )
 
 !    *******************************************************************
 !    ** LOOPS OVER ALL CYCLES AND ALL MOLECULES                       **
@@ -272,9 +267,9 @@
 
 !          ** MOVE I AND PICKUP THE CENTRAL IMAGE **
 
-              RXINEW = RXIOLD + ( 2.0 * ZBQLU01(DUMMY) - 1.0 ) * DRMAX
-              RYINEW = RYIOLD + ( 2.0 * ZBQLU01(DUMMY) - 1.0 ) * DRMAX
-              RZINEW = RZIOLD + ( 2.0 * ZBQLU01(DUMMY) - 1.0 ) * DRMAX
+              RXINEW = RXIOLD + ( 2.0 * ZBQLU01(DUMM) - 1.0 ) * DRMAX
+              RYINEW = RYIOLD + ( 2.0 * ZBQLU01(DUMM) - 1.0 ) * DRMAX
+              RZINEW = RZIOLD + ( 2.0 * ZBQLU01(DUMM) - 1.0 ) * DRMAX
 
               RXINEW = RXINEW - ANINT ( RXINEW )
               RYINEW = RYINEW - ANINT ( RYINEW )
@@ -298,7 +293,7 @@
                     RY(I)  = RYINEW
                     RZ(I)  = RZINEW
                     ACATMA = ACATMA + 1.0
-                 ELSEIF ( EXP ( - DELTVB ) .GT. ZBQLU01(DUMMY) ) THEN
+                 ELSEIF ( EXP ( - DELTVB ) .GT. ZBQLU01(DUMM) ) THEN
                     V      = V + DELTV
                     W      = W + DELTW
                     RX(I)  = RXINEW
@@ -312,8 +307,10 @@
 
 !          ** CALCULATE INSTANTANEOUS VALUES **
 
-              VN     = ( V + VLRC ) / REAL ( N )
-              PRES   = DENS * TEMP + W + WLRC
+              !VN     = ( V + VLRC ) / REAL ( N )
+              !PRES   = DENS * TEMP + W + WLRC
+	      VN     = ( V ) / REAL ( N )
+              PRES   = DENS * TEMP + W
 
 !          ** CONVERT PRESSURE TO LJ UNITS **
 
@@ -346,17 +343,6 @@
 
 !       ** PERFORM PERIODIC OPERATIONS  **
 
-           !IF ( MOD ( STEP, IRATIO ) .EQ. 0 ) THEN
-!          ** ADJUST MAXIMUM DISPLACEMENT **
-           !   RATIO = ACATMA / REAL ( N * IRATIO )
-            !  IF ( RATIO .GT. RATIOX ) THEN
-            !     DRMAX  = DRMAX  * 1.05
-            !  ELSE
-            !     DRMAX  = DRMAX  * 0.95
-            !  ENDIF
-            !  ACATMA = 0.0
-          ! ENDIF
-
            IF ( MOD ( STEP, IPRINT ) .EQ. 0 ) THEN
 !          ** WRITE OUT RUNTIME INFORMATION **
               WRITE(*,'(2I8,4F12.6)') STEP,INT(ACM), RATIO, VN, PRES, PARAM
@@ -368,7 +354,7 @@
 
         ENDDO
 
-        WRITE(6,'(20X,''EQUILIBRATION FINISHED '',I10)') STEP 
+        WRITE(6,'(20X,''EQUILIBRATION FINISHED '',I10)')
    
 !    *******************************************************************
 !    ** SIMULATED ANNEALING STARTED                                   **
@@ -395,9 +381,9 @@
 
 !          ** MOVE I AND PICKUP THE CENTRAL IMAGE **
 
-              RXINEW = RXIOLD + ( 2.0 * ZBQLU01(DUMMY) - 1.0 ) * DRMAX
-              RYINEW = RYIOLD + ( 2.0 * ZBQLU01(DUMMY) - 1.0 ) * DRMAX
-              RZINEW = RZIOLD + ( 2.0 * ZBQLU01(DUMMY) - 1.0 ) * DRMAX
+              RXINEW = RXIOLD + ( 2.0 * ZBQLU01(DUMM) - 1.0 ) * DRMAX
+              RYINEW = RYIOLD + ( 2.0 * ZBQLU01(DUMM) - 1.0 ) * DRMAX
+              RZINEW = RZIOLD + ( 2.0 * ZBQLU01(DUMM) - 1.0 ) * DRMAX
 
               RXINEW = RXINEW - ANINT ( RXINEW )
               RYINEW = RYINEW - ANINT ( RYINEW )
@@ -422,7 +408,7 @@
                     RZ(I)  = RZINEW
                     ACATMA = ACATMA + 1.0
 		    TCACC = TCACC + 1
-                 ELSEIF ( EXP ( - DELTVB ) .GT. ZBQLU01(DUMMY) ) THEN
+                 ELSEIF ( EXP ( - DELTVB ) .GT. ZBQLU01(DUMM) ) THEN
                     V      = V + DELTV
                     W      = W + DELTW
                     RX(I)  = RXINEW
@@ -437,8 +423,10 @@
 
 !          ** CALCULATE INSTANTANEOUS VALUES **
 
-              VN     = ( V + VLRC ) / REAL ( N )
-              PRES   = DENS * TEMP + W + WLRC
+              !VN     = ( V + VLRC ) / REAL ( N )
+              !PRES   = DENS * TEMP + W + WLRC
+	      VN     = ( V ) / REAL ( N )
+              PRES   = DENS * TEMP + W
 
 !          ** CONVERT PRESSURE TO LJ UNITS **
 
@@ -471,34 +459,23 @@
 
 !       ** PERFORM PERIODIC OPERATIONS  **
 
-           !IF ( MOD ( STEP, IRATIO ) .EQ. 0 ) THEN
-!          ** ADJUST MAXIMUM DISPLACEMENT **
-           !   RATIO = ACATMA / REAL ( N * IRATIO )
-           !   IF ( RATIO .GT. RATIOX ) THEN
-           !      DRMAX  = DRMAX  * 1.05
-           !   ELSE
-           !      DRMAX  = DRMAX  * 0.95
-           !   ENDIF
-           !   ACATMA = 0.0
-           !ENDIF
-
            IF ( MOD ( STEP, IPRINT ) .EQ. 0 ) THEN
 !          ** WRITE OUT RUNTIME INFORMATION **
-              WRITE(*,'(2I8,3F12.6,3I8)') STEP,INT(ACM), RATIO, VN, PRES, TEMP
+              WRITE(*,'(2I8,4F12.6)') STEP,INT(ACM), RATIO, VN, PRES, TEMP
            ENDIF
            IF ( MOD ( STEP, ISAVE ) .EQ. 0 ) THEN
 !          ** WRITE OUT THE CONFIGURATION AT INTERVALS **
               CALL WRITCN ( CNFILE )
            ENDIF
 
-	   IF ( TCACC .GT. 100000) THEN
+	   IF ( TCACC .GT. 10000) THEN
 !	   ** SET NEW TEMPERATURE AND RESET TCACC, TCATM **
 		TCACC = 0
 		TCATM = 0
 		TEMP = TEMP*0.996
 		BETA = BETA / 0.996
 	   ENDIF
-	   IF ( TCATM .EQ. 500000) THEN
+	   IF ( TCATM .EQ. 50000) THEN
 !	   ** SET NEW TEMPERATURE AND RESET TCACC, TCATM **
 		TCACC = 0
 		TCATM = 0
@@ -691,7 +668,9 @@
               RYIJ  = RYIJ - ANINT ( RYIJ )
               RZIJ  = RZIJ - ANINT ( RZIJ )
               RIJSQ = RXIJ * RXIJ + RYIJ * RYIJ + RZIJ * RZIJ
-              IF ( RIJSQ .LT. RCUTSQ ) THEN
+           
+!    ** Edit for tail-correction - not used **   
+	   IF ( RIJSQ .LT. RCUTSQ ) THEN
                  SR2 = SIGSQ / RIJSQ
                  SR6 = SR2 * SR2 * SR2
                  VIJ = SR6 * ( SR6 - 1.0 )
@@ -708,30 +687,11 @@
         RETURN
         END
 
-	REAL*8 FUNCTION RANF(IX)
-        RANF = ZBQLU01 ( DUMMY )
-        RETURN
-        END
-        
+	!REAL*8 FUNCTION RANF(IX)
+        !RANF = ZBQLU01 ( DUMMY )
+        !RETURN
+        !END
 
-!      REAL*8 FUNCTION RANF(IX)
-!     ---------------------------
-!     Random number generator
-!     uniform distribution [0,1[
-!     ix = seed < jj
-!     ---------------------------
-!      INTEGER IX, II, JJ
-!      INTEGER K1, I1, I2
-!      DOUBLE PRECISION P
-!      PARAMETER (II=127773,JJ=2147483647)
-!      PARAMETER (I1=16807,I2=2836,P=4.656612875D-10)
-      
-!      IX = I1*MOD(IX,II) - IX/II*I2
-!      IF ( IX .LT. 0) IX = IX + JJ
-!      RANF = IX * P
-!      RETURN
-!      END
-      
 !	RANDOM NUMBER GENERATOR
 
 ! *******************************************************************
@@ -896,7 +856,7 @@
       END
       
 !*****************************************************************
-      FUNCTION ZBQLU01(DUMMY)
+      REAL*8 FUNCTION ZBQLU01(DUMMY)
 
 !*       Returns a uniform random number between 0 & 1, using
 !*       a Marsaglia-Zaman type subtract-with-borrow generator.
@@ -914,7 +874,8 @@
 !*       the output was identical up to the 16th decimal place
 !*       after 10^10 calls, so we're probably OK ...
 
-      DOUBLE PRECISION ZBQLU01,DUMMY,B,C,ZBQLIX(43),X,B2,BINV
+	REAL*8 DUMMY
+      DOUBLE PRECISION B,C,ZBQLIX(43),X,B2,BINV
       INTEGER CURPOS,ID22,ID43
 
       COMMON /ZBQL0001/ ZBQLIX,B,C
