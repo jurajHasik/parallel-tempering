@@ -11,7 +11,7 @@
 ! *****************************************************************************
 
         INTEGER     NMAX
-        PARAMETER ( NMAX = 125 )
+        PARAMETER ( NMAX = 2000 )
         REAL*8        RX(NMAX), RY(NMAX), RZ(NMAX)
         INTEGER N
         COMMON /COORDS/ RX, RY, RZ, N

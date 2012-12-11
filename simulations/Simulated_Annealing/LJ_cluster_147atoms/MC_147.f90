@@ -8,6 +8,8 @@
 ! *****************************************************************************
 
 ! Modified by J.Hasik, Dec 2012
+! Optimization by Simulated Annealing, S Kirckpatrick, C. D. Gellaat; M.P. Vecchi
+! Science, New Series, Vol. 220, No. 4598. (May 13, 1983)
 
 ! *****************************************************************************
 ! **                                                                         **
@@ -95,7 +97,7 @@
         include 'common.f'
 
         REAL*8        DRMAX, DENS, TEMP, DENSLJ, SIGMA, RMIN, RCUT, BETA
-        REAL*8        RANF, ACM, ACATMA, PI, RATIO, SR9, SR3
+        REAL*8        ACM, ACATMA, PI, RATIO
         REAL*8        ACM1, DUMM, ZBQLU01
         REAL*8        V, VNEW, VOLD, VEND, VN, DELTV, DELTVB, VS
         REAL*8        W, WEND, WNEW, WOLD, PRES, DELTW, WS, PS
@@ -112,7 +114,8 @@
         INTEGER     STEP, I, NSTEP, IPRINT, ISAVE
         LOGICAL     OVRLAP
         CHARACTER   TITLE*80, CNFILE*30
-
+        CHARACTER   SAVEFILE*30
+        
         PARAMETER ( PI = 3.1415927 )
 	PARAMETER ( DUMM = 1.0 )
 
@@ -134,13 +137,19 @@
         READ (*,*) ISAVE
         WRITE(*,'('' ENTER THE CONFIGURATION FILE NAME            '')')
         READ (*,'(A)') CNFILE
-        WRITE(*,'('' ENTER THE FOLLOWING IN LENNARD-JONES UNITS '',/)')
-        WRITE(*,'('' ENTER THE DENSITY                            '')')
+        WRITE(*,'('' ENTER THE SAVE FILE NAME                     '')')
+        READ (*,'(A)') SAVEFILE
+        WRITE(*,'('' ENTER THE FOLLOWING IN LENNARD-JONES UNITS '',/)')  
+!	Argon
+!	3,76 [angstrom] - minimal pair separation in liquid at zero pressure     
+!	5,31 [angstrom] - lattice constant at 4K
+!       1,11 [sigma] - nearest neighbor distance 
+!	fcc - Crystal configuration at equilibrium
+!       Kittel, Introduction to Solid State physics, 8th edition  
+	WRITE(*,'('' ENTER THE DENSITY                        '')')
         READ (*,*) DENS
         WRITE(*,'('' ENTER THE TEMPERATURE                        '')')
         READ (*,*) TEMP
-        WRITE(*,'('' ENTER THE POTENTIAL CUTOFF DISTANCE          '')')
-        READ (*,*) RCUT
         WRITE(*,'('' RANDOM NUMBER GENERATOR SEED                 '')')
         READ (*,*) SEED
 
@@ -154,7 +163,6 @@
         WRITE(*,'('' CONFIGURATION FILE  NAME  '',A     )') CNFILE
         WRITE(*,'('' TEMPERATURE               '',F10.4 )') TEMP
         WRITE(*,'('' DENSITY                   '',F10.4 )') DENS
-        WRITE(*,'('' POTENTIAL CUTOFF          '',F10.4 )') RCUT
 
 !    ** READ INITIAL CONFIGURATION **
 
@@ -162,18 +170,19 @@
 
 !    ** CONVERT INPUT DATA TO PROGRAM UNITS **
 
-!	epsilon/K_b = 119.8 K
-!	sigma = 3,41 Ang	
+!       John A. White "Lennard-Jones as a model for argon and test of extended renormalization group calculations", 
+!	Journal of Chemical Physics 111 pp. 9352-9356 (1999)
+!	Parameter Set #4
+!	epsilon/K_b = 125.7 K
+!	sigma = 3,4345 Ang	
 
         BETA   = 1.0 / TEMP
         SIGMA  = ( DENS / REAL ( N ) ) ** ( 1.0 / 3.0 )
-        RMIN   = 0.70 * SIGMA
-        RCUT   = RCUT * SIGMA
+        !RMIN - Kittel, Introduction to Solid State Physics
+        RMIN   = 0.707 * SIGMA
         DRMAX  = 0.15 * SIGMA
         DENSLJ = DENS
         DENS   = DENS / ( SIGMA ** 3 )
-
-        IF ( RCUT .GT. 0.5 ) STOP ' CUT-OFF TOO LARGE '
 
 !    ** ZERO ACCUMULATORS **
 
@@ -197,39 +206,19 @@
         NPARAM=0
         FPAR=0.0
 
-!    ** CALCULATE LONG RANGE CORRECTIONS    **
-!    ** SPECIFIC TO THE LENNARD JONES FLUID **
-
-        !SR3 = ( SIGMA / RCUT ) ** 3
-        !SR9 = SR3 ** 3
-
-        !VLRC12 =   8.0 * PI * DENSLJ * REAL ( N ) * SR9 / 9.0
-        !VLRC6  = - 8.0 * PI * DENSLJ * REAL ( N ) * SR3 / 3.0
-        !VLRC   =   VLRC12 + VLRC6
-        !WLRC12 =   4.0  * VLRC12
-        !WLRC6  =   2.0  * VLRC6
-        !WLRC   =   WLRC12 + WLRC6
-
 !    ** WRITE OUT SOME USEFUL INFORMATION **
 
         WRITE(*,'('' SIGMA/BOX              =  '',F10.4)')  SIGMA
         WRITE(*,'('' RMIN/BOX               =  '',F10.4)')  RMIN
-        WRITE(*,'('' RCUT/BOX               =  '',F10.4)')  RCUT
-        !WRITE(*,'('' LRC FOR <V>            =  '',F10.4)')  VLRC
-        !WRITE(*,'('' LRC FOR <W>            =  '',F10.4)')  WLRC
 
 !    ** CALCULATE INITIAL ENERGY AND CHECK FOR OVERLAPS **
 
-        CALL SUMUP ( RCUT, RMIN, SIGMA, OVRLAP, V, W )
+        CALL SUMUP ( RMIN, SIGMA, OVRLAP, V, W )
 
         IF ( OVRLAP ) STOP ' OVERLAP IN INITIAL CONFIGURATION '
 
         CALL ORDER ( KLATX, KLATY, KLATZ, PARS )
-
-        !VS = ( V + VLRC ) / REAL ( N )
-        !WS = ( W + WLRC ) / REAL ( N )
-        !PS = DENS * TEMP + W + WLRC
-        !PS = PS * SIGMA ** 3
+        
 	VS = ( V ) / REAL ( N )
         WS = ( W ) / REAL ( N )
         PS = DENS * TEMP + W
@@ -251,7 +240,7 @@
 !    ** LOOPS OVER ALL CYCLES AND ALL MOLECULES                       **
 !    *******************************************************************
 
-	OPEN ( UNIT = 11, FILE = 'conf.xyz', STATUS = 'UNKNOWN' )
+	OPEN ( UNIT = 11, FILE = SAVEFILE, STATUS = 'UNKNOWN' )
 
         DO STEP = 1, NEQU
 
@@ -263,7 +252,7 @@
 
 !          ** CALCULATE THE ENERGY OF I IN THE OLD CONFIGURATION **
 
-              CALL ENERGY(RXIOLD,RYIOLD,RZIOLD,I,RCUT,SIGMA,VOLD,WOLD)
+              CALL ENERGY(RXIOLD,RYIOLD,RZIOLD,I,SIGMA,VOLD,WOLD)
 
 !          ** MOVE I AND PICKUP THE CENTRAL IMAGE **
 
@@ -271,13 +260,9 @@
               RYINEW = RYIOLD + ( 2.0 * ZBQLU01(DUMM) - 1.0 ) * DRMAX
               RZINEW = RZIOLD + ( 2.0 * ZBQLU01(DUMM) - 1.0 ) * DRMAX
 
-              RXINEW = RXINEW - ANINT ( RXINEW )
-              RYINEW = RYINEW - ANINT ( RYINEW )
-              RZINEW = RZINEW - ANINT ( RZINEW )
-
 !          ** CALCULATE THE ENERGY OF I IN THE NEW CONFIGURATION **
 
-              CALL ENERGY(RXINEW,RYINEW,RZINEW,I,RCUT,SIGMA,VNEW,WNEW)
+              CALL ENERGY(RXINEW,RYINEW,RZINEW,I,SIGMA,VNEW,WNEW)
 
 !          ** CHECK FOR ACCEPTANCE **
 
@@ -285,8 +270,7 @@
               DELTW  = WNEW - WOLD
               DELTVB = BETA * DELTV
 
-              IF ( DELTVB .LT. 75.0 ) THEN
-                 IF ( DELTV .LE. 0.0 ) THEN
+              IF ( DELTV .LE. 0.0 ) THEN
                     V      = V + DELTV
                     W      = W + DELTW
                     RX(I)  = RXINEW
@@ -300,15 +284,12 @@
                     RY(I)  = RYINEW
                     RZ(I)  = RZINEW
                     ACATMA = ACATMA + 1.0
-                 ENDIF
-              ENDIF
+               ENDIF
 
-              ACM = ACM + 1.0
-
+               ACM = ACM + 1.0
+               
 !          ** CALCULATE INSTANTANEOUS VALUES **
 
-              !VN     = ( V + VLRC ) / REAL ( N )
-              !PRES   = DENS * TEMP + W + WLRC
 	      VN     = ( V ) / REAL ( N )
               PRES   = DENS * TEMP + W
 
@@ -345,7 +326,7 @@
 
            IF ( MOD ( STEP, IPRINT ) .EQ. 0 ) THEN
 !          ** WRITE OUT RUNTIME INFORMATION **
-              WRITE(*,'(2I8,4F12.6)') STEP,INT(ACM), RATIO, VN, PRES, PARAM
+              WRITE(*,'(2I8,4F12.6)') STEP, INT(ACM), RATIO, VN, PRES, PARAM
            ENDIF
            IF ( MOD ( STEP, ISAVE ) .EQ. 0 ) THEN
 !          ** WRITE OUT THE CONFIGURATION AT INTERVALS **
@@ -363,7 +344,7 @@
 	TCACC = 0
 	TCATM = 0
 
-        DO WHILE ( TEMP .GT. 0.042 )	
+        DO WHILE ( TEMP .GT. 0.039777 )	
 	
 	   STEP = STEP+1
 
@@ -377,7 +358,7 @@
 
 !          ** CALCULATE THE ENERGY OF I IN THE OLD CONFIGURATION **
 
-              CALL ENERGY(RXIOLD,RYIOLD,RZIOLD,I,RCUT,SIGMA,VOLD,WOLD)
+              CALL ENERGY(RXIOLD,RYIOLD,RZIOLD,I,SIGMA,VOLD,WOLD)
 
 !          ** MOVE I AND PICKUP THE CENTRAL IMAGE **
 
@@ -385,13 +366,9 @@
               RYINEW = RYIOLD + ( 2.0 * ZBQLU01(DUMM) - 1.0 ) * DRMAX
               RZINEW = RZIOLD + ( 2.0 * ZBQLU01(DUMM) - 1.0 ) * DRMAX
 
-              RXINEW = RXINEW - ANINT ( RXINEW )
-              RYINEW = RYINEW - ANINT ( RYINEW )
-              RZINEW = RZINEW - ANINT ( RZINEW )
-
 !          ** CALCULATE THE ENERGY OF I IN THE NEW CONFIGURATION **
 
-              CALL ENERGY(RXINEW,RYINEW,RZINEW,I,RCUT,SIGMA,VNEW,WNEW)
+              CALL ENERGY(RXINEW,RYINEW,RZINEW,I,SIGMA,VNEW,WNEW)
 
 !          ** CHECK FOR ACCEPTANCE **
 
@@ -399,8 +376,7 @@
               DELTW  = WNEW - WOLD
               DELTVB = BETA * DELTV
 
-              IF ( DELTVB .LT. 75.0 ) THEN
-                 IF ( DELTV .LE. 0.0 ) THEN
+              IF ( DELTV .LE. 0.0 ) THEN
                     V      = V + DELTV
                     W      = W + DELTW
                     RX(I)  = RXINEW
@@ -416,15 +392,12 @@
                     RZ(I)  = RZINEW
                     ACATMA = ACATMA + 1.0
 		    TCACC = TCACC + 1
-                 ENDIF
-              ENDIF
+               ENDIF
 
-              ACM = ACM + 1.0
-
+                ACM = ACM + 1.0
+               
 !          ** CALCULATE INSTANTANEOUS VALUES **
 
-              !VN     = ( V + VLRC ) / REAL ( N )
-              !PRES   = DENS * TEMP + W + WLRC
 	      VN     = ( V ) / REAL ( N )
               PRES   = DENS * TEMP + W
 
@@ -461,7 +434,7 @@
 
            IF ( MOD ( STEP, IPRINT ) .EQ. 0 ) THEN
 !          ** WRITE OUT RUNTIME INFORMATION **
-              WRITE(*,'(2I8,4F12.6)') STEP,INT(ACM), RATIO, VN, PRES, TEMP
+              WRITE(*,'(2I8,4F12.6)') STEP, INT(ACM), RATIO, VN, PRES, TEMP
            ENDIF
            IF ( MOD ( STEP, ISAVE ) .EQ. 0 ) THEN
 !          ** WRITE OUT THE CONFIGURATION AT INTERVALS **
@@ -472,15 +445,15 @@
 !	   ** SET NEW TEMPERATURE AND RESET TCACC, TCATM **
 		TCACC = 0
 		TCATM = 0
-		TEMP = TEMP*0.996
-		BETA = BETA / 0.996
+		TEMP = TEMP*0.999
+		BETA = BETA / 0.999
 	   ENDIF
 	   IF ( TCATM .EQ. 50000) THEN
 !	   ** SET NEW TEMPERATURE AND RESET TCACC, TCATM **
 		TCACC = 0
 		TCATM = 0
-		TEMP = TEMP*0.996
-		BETA = BETA / 0.996
+		TEMP = TEMP*0.999
+		BETA = BETA / 0.999
 	   ENDIF
 	   	
 !    *******************************************************************
@@ -493,7 +466,7 @@
 
 !    ** CHECKS FINAL VALUE OF THE POTENTIAL ENERGY IS CONSISTENT **
 
-        CALL SUMUP ( RCUT, RMIN, SIGMA, OVRLAP, VEND, WEND )
+        CALL SUMUP ( RMIN, SIGMA, OVRLAP, VEND, WEND )
 
         IF ( ABS ( VEND - V ) .GT. 1.0E-03 ) THEN
 
@@ -542,7 +515,7 @@
 
 
 
-        SUBROUTINE SUMUP ( RCUT, RMIN, SIGMA, OVRLAP, V, W )
+        SUBROUTINE SUMUP ( RMIN, SIGMA, OVRLAP, V, W )
 
 
 !    *******************************************************************
@@ -564,17 +537,16 @@
 
         include 'common.f'
 
-        REAL*8        SIGMA, RMIN, RCUT, V, W
+        REAL*8        SIGMA, RMIN, V, W
         LOGICAL     OVRLAP
 
-        REAL*8        RCUTSQ, RMINSQ, SIGSQ, RXIJ, RYIJ, RZIJ
+        REAL*8        RMINSQ, SIGSQ, RXIJ, RYIJ, RZIJ
         REAL*8        RXI, RYI, RZI, VIJ, WIJ, SR2, SR6, RIJSQ
         INTEGER     I, J
 
 !    *******************************************************************
 
         OVRLAP = .FALSE.
-        RCUTSQ = RCUT * RCUT
         RMINSQ = RMIN * RMIN
         SIGSQ  = SIGMA * SIGMA
 
@@ -591,15 +563,11 @@
               RXIJ  = RXI - RX(J)
               RYIJ  = RYI - RY(J)
               RZIJ  = RZI - RZ(J)
-!          ** MINIMUM IMAGE THE PAIR SEPARATIONS **
-              RXIJ  = RXIJ - ANINT ( RXIJ )
-              RYIJ  = RYIJ - ANINT ( RYIJ )
-              RZIJ  = RZIJ - ANINT ( RZIJ )
               RIJSQ = RXIJ * RXIJ + RYIJ * RYIJ + RZIJ * RZIJ
               IF ( RIJSQ .LT. RMINSQ ) THEN
                  OVRLAP = .TRUE.
                  RETURN
-              ELSEIF ( RIJSQ .LT. RCUTSQ ) THEN
+              ELSE
                  SR2 = SIGSQ / RIJSQ
                  SR6 = SR2 * SR2 * SR2
                  VIJ = SR6 * ( SR6 - 1.0 )
@@ -618,7 +586,7 @@
 
 
 
-        SUBROUTINE ENERGY ( RXI, RYI, RZI, I, RCUT, SIGMA, V, W )
+        SUBROUTINE ENERGY ( RXI, RYI, RZI, I, SIGMA, V, W )
 
 
 !    *******************************************************************
@@ -642,16 +610,15 @@
 
         include 'common.f'
 
-        REAL*8        RCUT, SIGMA, RXI, RYI, RZI, V, W
+        REAL*8        SIGMA, RXI, RYI, RZI, V, W
         INTEGER     I
 
-        REAL*8        RCUTSQ, SIGSQ, SR2, SR6
+        REAL*8        SIGSQ, SR2, SR6
         REAL*8        RXIJ, RYIJ, RZIJ, RIJSQ, VIJ, WIJ
         INTEGER     J
 
 !     ******************************************************************
 
-        RCUTSQ = RCUT * RCUT
         SIGSQ  = SIGMA * SIGMA
 
         V      = 0.0
@@ -664,20 +631,15 @@
               RXIJ  = RXI - RX(J)
               RYIJ  = RYI - RY(J)
               RZIJ  = RZI - RZ(J)
-              RXIJ  = RXIJ - ANINT ( RXIJ )
-              RYIJ  = RYIJ - ANINT ( RYIJ )
-              RZIJ  = RZIJ - ANINT ( RZIJ )
               RIJSQ = RXIJ * RXIJ + RYIJ * RYIJ + RZIJ * RZIJ
-           
-!    ** Edit for tail-correction - not used **   
-	   IF ( RIJSQ .LT. RCUTSQ ) THEN
+	   
                  SR2 = SIGSQ / RIJSQ
                  SR6 = SR2 * SR2 * SR2
                  VIJ = SR6 * ( SR6 - 1.0 )
                  WIJ = SR6 * ( SR6 - 0.5 )
                  V   = V + VIJ
                  W   = W + WIJ
-              ENDIF
+
            ENDIF
         ENDDO
 
@@ -686,12 +648,8 @@
 
         RETURN
         END
-
-	!REAL*8 FUNCTION RANF(IX)
-        !RANF = ZBQLU01 ( DUMMY )
-        !RETURN
-        !END
-
+        
+        
 !	RANDOM NUMBER GENERATOR
 
 ! *******************************************************************
@@ -979,7 +937,7 @@
 
 
         WRITE ( CNUNIT,* ) N
-	WRITE ( CNUNIT,* ) 
+	WRITE ( CNUNIT,* ) 'Temp ',TEMP
         DO I=1,N
            WRITE ( CNUNIT,* ) 'Ar ', RX(I), RY(I), RZ(I)
         ENDDO
