@@ -1,4 +1,4 @@
-Argon - Simulated annealing form T = 40 K
+Argon - Simulated annealing from T = 40 K
 
 *               # NEQU   :  number equilibration steps
 *               # IPRINT :  output interval
