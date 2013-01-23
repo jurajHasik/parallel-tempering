@@ -110,7 +110,7 @@
 	
 	INTEGER     NMAX, N
 	PARAMETER ( NMAX = 309 )
-! 		     Maximal number of atoms
+! 		     Maximal number of atoms, Number of atoms
 	REAL*8,     dimension(NMAX) :: RX, RY, RZ
 
         INTEGER     STEP, I, NSTEP, IPRINT, ISAVE

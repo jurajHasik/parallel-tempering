@@ -1,4 +1,4 @@
-! -*-fortran-*-
+ ! -*-fortran-*-
 
 ! *****************************************************************************
 ! ** FICHE F.11.  CONSTANT-NVT MONTE CARLO FOR LENNARD JONES ATOMS           **
@@ -13,28 +13,14 @@
 ! Optimization by Simulated Annealing, S Kirckpatrick, C. D. Gellaat; M.P. Vecchi
 ! Science, New Series, Vol. 220, No. 4598. (May 13, 1983)
 
-! *****************************************************************************
-! **                                                                         **
-! **  Modified by A.Kuronen, Feb 1997:                                       **
-! **                                                                         **
-! **  Coordinates are now in common area COORDS which is in file 'common.f'. **
-! **      This file is read in all subroutines using command 'include'.      **
-! **      If your FORTRAN compiler does not have this command the file       **
-! **      can be included by hand.                                           **
-! **  Configuration file read as formatted (ascii) data.                     **
-! **  Number of particles read from configuration file.                      **
-! **  Added input parameter NEQU. This is the number of MC cycles simulated  **
-! **      before we start to calculate averages.                             **
-! **  Added calculation of order parameter. K-vector is set to 2pi/a(111).   **
-! **  The wanted acceptance ratio is now read in (RATIOX).                   **
-! **                                                                         **
-! *****************************************************************************
-
-
+! Parallel Tempering 20.1.2013
 
         PROGRAM MCNVT
-
-	COMMON /COORDS/ RX, RY, RZ
+	
+	TYPE LJENSAMBLE
+	  REAL*8 BETA, V, VN, W
+	  REAL*8, ALLOCATABLE, dimension(:) :: CX, CY, CZ
+	END TYPE LJENSAMBLE
 	
 !    *******************************************************************
 !    ** MONTE CARLO SIMULATION PROGRAM IN THE CONSTANT-NVT ENSEMBLE.  **
@@ -91,35 +77,36 @@
 !    ** SUBROUTINE WRITCN ( CNFILE )                                  **
 !    **    WRITES OUT A CONFIGURATION                                 **
 !    ** REAL FUNCTION RANF ( SEED )                                   **
-!    **    RETURNS A UNIFORM RANDOM NUMBER BETWEEN ZERO AND ONE       **SIGMA
+!    **    RETURNS A UNIFORM RANDOM NUMBER BETWEEN ZERO AND ONE       **
 !    ** SUBROUTINE ORDER ( KX, KY, KZ, RHO )                          **
 !    **    RETURNS THE ORDER PARAMETER RHO FOR K-VECTOR (KX,KY,KZ)    **
 !    **                                                               **
 !    *******************************************************************
 
-        REAL*8        DRMAX, DENS, TEMP, DENSLJ, SIGMA, RMIN, RCUT, BETA
-        REAL*8        PI
-        REAL*8        DUMM, ZBQLU01
-        REAL*8        V, VNEW, VOLD, VEND, VN, DELTV, DELTVB, VS
-        REAL*8        W, WEND, WNEW, WOLD, PRES, DELTW, WS, PS
-        REAL*8        ACM
+        REAL*8        DRMAX, DENS, TEMP, DENSLJ, SIGMA
+        REAL*8        ZBQLU01
+        REAL*8        V, VNEW, VOLD, VEND, VN, deltaV
+        REAL*8        W, WEND, WNEW, WOLD, PRES
+        INTEGER       PTSwitch, numSwitch
         INTEGER       SEED
-        REAL*8        TSTEP
+        REAL*8        TSTEP, tempB, deltaB
         
 	INTEGER     NEQU, ANNEAL
 	
-	INTEGER     NMAX, N
-	PARAMETER ( NMAX = 309 )
-! 		     Maximal number of atoms
-	REAL*8,     dimension(NMAX) :: RX, RY, RZ
-
-        INTEGER     STEP, I, NSTEP, IPRINT, ISAVE
-        LOGICAL     OVRLAP
+	INTEGER     N
+	REAL*8, ALLOCATABLE, dimension(:) :: RX, RY, RZ
+	
+	INTEGER     ENSMAX, ENS
+	PARAMETER   ( ENSMAX = 20 ) ! Maximal number of ensambles 
+	TYPE(LJENSAMBLE), dimension( ENSMAX ) :: LJENSAMBLES
+	
+	
+        INTEGER     STEP, I, E, IPRINT, ISAVE
         CHARACTER   TITLE*80, CNFILE*30
         CHARACTER   SAVEFILE*30
         
-        PARAMETER ( PI = 3.1415927 )
-	PARAMETER ( DUMM = 1.0 )
+        REAL*8, PARAMETER :: PI = 3.1415927
+	REAL*8, PARAMETER :: DUMM = 1.0 
 
 !       ****************************************************************
 
@@ -131,6 +118,8 @@
 
         WRITE(*,'('' ENTER THE RUN TITLE                          '')')
         READ (*,'(A)') TITLE
+        WRITE(*,'('' ENTER Number of Atoms '')')
+	READ (*,*) N
         WRITE(*,'('' ENTER NUMBER OF EQUILIBRATION CYCLES         '')')
         READ (*,*) NEQU
         WRITE(*,'('' ENTER NUMBER OF ANNEALING CYCLES             '')')
@@ -160,7 +149,6 @@
 !    ** WRITE INPUT DATA **
 
         WRITE(*,'(       //1X                    ,A     )') TITLE
-        WRITE(*,'('' NUMBER OF ATOMS           '',I10   )') N
         WRITE(*,'('' OUTPUT FREQUENCY          '',I10   )') IPRINT
         WRITE(*,'('' SAVE FREQUENCY            '',I10   )') ISAVE
         WRITE(*,'('' RANDOM NUMBER GEN. SEED   '',I10   )') SEED
@@ -169,9 +157,17 @@
         WRITE(*,'('' DENSITY                   '',F10.4 )') DENS
 
 !    ** READ INITIAL CONFIGURATION **
+	ALLOCATE(RX(N),RY(N),RZ(N))
+        CALL READCN ( CNFILE, N, RX, RY, RZ )
 
-        CALL READCN ( CNFILE, N )
-
+!    ** Copy starting configurations to each ensamble **
+        DO I=1, ENSMAX
+	  ALLOCATE( LJENSAMBLES(I)%CX(N), LJENSAMBLES(I)%CY(N), LJENSAMBLES(I)%CZ(N) )
+	  LJENSAMBLES(I)%CX = RX
+	  LJENSAMBLES(I)%CY = RY
+	  LJENSAMBLES(I)%CZ = RZ
+        ENDDO
+        
 !    ** CONVERT INPUT DATA TO PROGRAM UNITS **
 
 !       John A. White "Lennard-Jones as a model for argon and test of extended renormalization group calculations", 
@@ -180,10 +176,7 @@
 !	epsilon/K_b = 125.7 K
 !	sigma = 3,4345 Ang	
 
-        BETA   = 1.0 / TEMP
         SIGMA  = ( DENS / REAL ( N ) ) ** ( 1.0 / 3.0 )
-        !RMIN - Kittel, Introduction to Solid State Physics
-        RMIN   = 0.707 * SIGMA
         DRMAX  = 0.15 * SIGMA
         DENSLJ = DENS
         DENS   = DENS / ( SIGMA ** 3 )
@@ -191,77 +184,98 @@
 !    ** WRITE OUT SOME USEFUL INFORMATION **
 
         WRITE(*,'('' SIGMA/BOX              =  '',F10.4)')  SIGMA
-        WRITE(*,'('' RMIN/BOX               =  '',F10.4)')  RMIN
 
 !    ** CALCULATE INITIAL ENERGY AND CHECK FOR OVERLAPS **
+!    ** Set V, VN, W, Beta for each ensamble **        
+	DO I=1, ENSMAX
+	   CALL SUMUP ( SIGMA, N, LJENSAMBLES(I)%V, LJENSAMBLES(I)%W, LJENSAMBLES(I)%CX, &
+	                & LJENSAMBLES(I)%CY, LJENSAMBLES(I)%CZ )
+	   LJENSAMBLES(I)%VN = LJENSAMBLES(I)%V / REAL ( N )
+        ENDDO
 
-        CALL SUMUP ( RMIN, SIGMA, OVRLAP, V, W, N )
-
-        IF ( OVRLAP ) STOP ' OVERLAP IN INITIAL CONFIGURATION '
+!    ** Initialize temperatures across ensambles ** 
+        TSTEP = TEMP / 100
+        DO I=1, ENSMAX
+	   LJENSAMBLES(I)%BETA = 1.0 / (TEMP + TSTEP*(I-1))
+        ENDDO
         
-	VS = ( V ) / REAL ( N )
-        WS = ( W ) / REAL ( N )
-        PS = DENS * TEMP + W
-        PS = PS * SIGMA ** 3
-
-        WRITE(*,'('' INITIAL V              =  '', F10.4 )' ) VS
-        WRITE(*,'('' INITIAL W              =  '', F10.4 )' ) WS
-        WRITE(*,'('' INITIAL P              =  '', F10.4 )' ) PS
-
-        WRITE(*,'(//'' START OF MARKOV CHAIN               ''//)')
-        WRITE(*,'(''    STEP    NMOVE       V/N  '',&
-        ''     P        TEMP ''/)')
+        WRITE(*,'('' INITIAL VN for each ensamble =  '', F10.4 )' ) LJENSAMBLES(1)%VN
+        
+        WRITE(*,'(//'' START OF PARALLEL TEMPERING          ''//)')
+        WRITE(*,'(''    STEP      V/N      P       TEMP ''/)')
         
 !    ** INITIALIZE RANDOM NUMBER GENERATOR **        
 	CALL ZBQLINI ( SEED )
 
 !    *******************************************************************
-!    ** LOOPS OVER ALL CYCLES AND ALL MOLECULES                       **
+!    ** LOOPS OVER ALL ENSAMBLES                                      **
 !    *******************************************************************
+        DO E = 1, ENSMAX
+           DO STEP = 1, NEQU
 
-        DO STEP = 1, NEQU
+              CALL DOMOVES ( N, SIGMA, DRMAX, LJENSAMBLES(E)%V, LJENSAMBLES(E)%W, LJENSAMBLES(E)%BETA, &
+                             & LJENSAMBLES(E)%CX, LJENSAMBLES(E)%CY, LJENSAMBLES(E)%CZ )
 
-           CALL DOMOVES ( N, SIGMA, DRMAX, V, W, VN, PRES, DENS, BETA, &
-		     &TEMP, ACM, STEP, NEQU )
-
-!       ** PERFORM PERIODIC OPERATIONS  **
-
-           IF ( MOD ( STEP, IPRINT ) .EQ. 0 ) THEN
+!          ** PERFORM PERIODIC OPERATIONS  **
+              !IF ( MOD ( STEP, IPRINT ) .EQ. 0 ) THEN
 !          ** WRITE OUT RUNTIME INFORMATION **
-              WRITE(*,'(2I8,4F12.6)') STEP, INT(ACM), VN, PRES, TEMP
-           ENDIF
-           IF ( MOD ( STEP, ISAVE ) .EQ. 0 ) THEN
+		 !TEMP = 1 / LJENSAMBLES(E)%BETA
+                 !WRITE(*,'(1I8,2F12.6)') STEP, LJENSAMBLES(E)%VN, TEMP
+              !ENDIF
+              !IF ( MOD ( STEP, ISAVE ) .EQ. 0 ) THEN
 !          ** WRITE OUT THE CONFIGURATION AT INTERVALS **
-              CALL WRITCN ( SAVEFILE, N, TEMP )
-           ENDIF
-
+                 !CALL WRITCN ( SAVEFILE, N, TEMP )
+              !ENDIF
+           ENDDO
         ENDDO
-
+           
         WRITE(6,'(20X,''EQUILIBRATION FINISHED '',I10)')
    
 !    *******************************************************************
-!    ** SIMULATED ANNEALING STARTED                                   **
+!    ** PARALLEL TAMPERING STARTED                                    **
 !    *******************************************************************
-	TSTEP = ( TEMP - 0.039777 ) / ANNEAL 
+	! Minimum temperature reached during simulation - 0.039777 in LJ units
+	TSTEP = ( TEMP - 0.039777 ) / (ANNEAL - NEQU)
+	! Try swap move every PTSwitch moves	
+	PTSwitch = 100	
+	numSwitch = 0	
 		
 	DO STEP = NEQU, ANNEAL
-	
-           CALL DOMOVES ( N, SIGMA, DRMAX, V, W, VN, PRES, DENS, BETA, &
-		     &TEMP, ACM, STEP, NEQU )
-
-!       ** PERFORM PERIODIC OPERATIONS  **
-
+	   DO E = 1, ENSMAX
+              CALL DOMOVES ( N, SIGMA, DRMAX, LJENSAMBLES(E)%V, LJENSAMBLES(E)%W, LJENSAMBLES(E)%BETA, &
+                             & LJENSAMBLES(E)%CX, LJENSAMBLES(E)%CY, LJENSAMBLES(E)%CZ )
+           ENDDO
+!          ** PERFORM PERIODIC OPERATIONS  **
+	   IF ( MOD (STEP, PTSwitch ) .EQ. 0 ) THEN
+	      DO E = 1, ENSMAX-1
+		 deltaB = LJENSAMBLES(E+1)%BETA - LJENSAMBLES(E)%BETA
+		 deltaV = LJENSAMBLES(E)%V - LJENSAMBLES(E+1)%V
+	         IF ( LJENSAMBLES(E+1)%V .LE. LJENSAMBLES(E)%V ) THEN
+		    tempB = LJENSAMBLES(E)%BETA
+		    LJENSAMBLES(E)%BETA = LJENSAMBLES(E+1)%BETA
+		    LJENSAMBLES(E+1)%BETA = tempB
+		    numSwitch = numSwitch + 1
+		 ELSEIF (EXP ( deltaB * deltaV ) .GT. ZBQLU01(DUMM)) THEN
+		    tempB = LJENSAMBLES(E)%BETA
+		    LJENSAMBLES(E)%BETA = LJENSAMBLES(E+1)%BETA
+		    LJENSAMBLES(E+1)%BETA = tempB
+		    numSwitch = numSwitch + 1
+                 ENDIF
+              ENDDO
+	   ENDIF
+           
            IF ( MOD ( STEP, IPRINT ) .EQ. 0 ) THEN
 !          ** WRITE OUT RUNTIME INFORMATION **
-              WRITE(*,'(2I8,4F12.6)') STEP, INT(ACM), VN, PRES, TEMP
+              WRITE(*,'(1I8)') STEP
            ENDIF
-           IF ( MOD ( STEP, ISAVE ) .EQ. 0 ) THEN
+           !IF ( MOD ( STEP, ISAVE ) .EQ. 0 ) THEN
 !          ** WRITE OUT THE CONFIGURATION AT INTERVALS **
-              CALL WRITCN ( SAVEFILE, N, TEMP )
-           ENDIF
-
-           TEMP = TEMP - TSTEP
-           BETA = 1.0 / TEMP
+           !   CALL WRITCN ( SAVEFILE, N, TEMP )
+           !ENDIF
+        DO E = 1, ENSMAX
+	   tempB = LJENSAMBLES(E)%BETA
+	   LJENSAMBLES(E)%BETA = 1 / ( 1 / tempB - TSTEP )
+        ENDDO
            	   	
 !    *******************************************************************
 !    ** ENDS THE LOOP OVER CYCLES                                     **
@@ -269,23 +283,29 @@
 
         ENDDO     	  	   
         
-	WRITE(*,'(//'' END OF SIMULATED ANNEALING         ''//)')
-
+	WRITE(*,'(//'' END OF PARALLEL TEMPERING         ''//)')
+	WRITE(*,'(I10)') numSwitch 
+	
 !    ** CHECKS FINAL VALUE OF THE POTENTIAL ENERGY IS CONSISTENT **
 
-        CALL SUMUP ( RMIN, SIGMA, OVRLAP, VEND, WEND, N )
+        DO I=1, ENSMAX
+	   CALL SUMUP ( SIGMA, N, LJENSAMBLES(I)%V, LJENSAMBLES(I)%W, LJENSAMBLES(I)%CX, &
+	                & LJENSAMBLES(I)%CY, LJENSAMBLES(I)%CZ )
+	   LJENSAMBLES(I)%VN = LJENSAMBLES(I)%V / REAL ( N )
+        ENDDO
 
-        IF ( ABS ( VEND - V ) .GT. 1.0E-03 ) THEN
-
-           WRITE(*,'('' PROBLEM WITH ENERGY,'')')
-           WRITE(*,'('' VEND              = '', E20.6)') VEND
-           WRITE(*,'('' V                 = '', E20.6)') V
-
-        ENDIF
+        DO I=1, ENSMAX
+	   tempB = 1 / LJENSAMBLES(I)%BETA
+	   WRITE(*, '('' V/N at Temp for ensamble - '',I10)') I
+	   WRITE(*,'(2F12.6)') LJENSAMBLES(I)%VN, tempB
+        ENDDO
 
 !    ** WRITE OUT THE FINAL CONFIGURATION FROM THE RUN **
 
-        CALL WRITCN ( SAVEFILE, N, TEMP )
+        DO I=1, ENSMAX
+           CALL WRITCN ( SAVEFILE, N, LJENSAMBLES(I)%VN, LJENSAMBLES(I)%CX, &
+	                 & LJENSAMBLES(I)%CY, LJENSAMBLES(I)%CZ )
+        ENDDO
 
         WRITE(*,'(/'' END OF SIMULATION '')')
 
@@ -294,22 +314,17 @@
 
 
 
-	SUBROUTINE DOMOVES ( N, SIGMA, DRMAX, V, W, VN, PRES, DENS, BETA, &
-	& TEMP, STEP, NEQU )
-
-	COMMON /COORDS/ RX, RY, RZ
+	SUBROUTINE DOMOVES ( N, SIGMA, DRMAX, V, W, BETA, tempX, tempY, tempZ )
 
 !    *******************************************************************  
 !    ** DOES ONE CYCLE OF TRIAL MOVES OVER ALL ATOMS                  **
 !    **                                                               **
 !    *******************************************************************	
 	
-	INTEGER     N, NMAX
-	PARAMETER   ( NMAX = 309 )
-	REAL*8,	    dimension(NMAX) :: RX, RY, RZ
-	REAL*8      SIGMA, DRMAX, ACM
-	REAL*8      V, W, BETA, VN, PRES, DENS, TEMP
-	INTEGER     STEP, NEQU
+	INTEGER     N
+	REAL*8      SIGMA, DRMAX
+	REAL*8      V, W, BETA
+	REAL*8,	    dimension(N) :: tempX, tempY, tempZ
 	
 	REAL*8      RXIOLD, RYIOLD, RZIOLD, RXINEW, RYINEW, RZINEW
 	REAL*8      VNEW, VOLD, DELTV, DELTVB
@@ -321,13 +336,13 @@
 	
 	DO I = 1, N
 
-              RXIOLD = RX(I)
-              RYIOLD = RY(I)
-              RZIOLD = RZ(I)
+              RXIOLD = tempX(I)
+              RYIOLD = tempY(I)
+              RZIOLD = tempZ(I)
 
 !          ** CALCULATE THE ENERGY OF I IN THE OLD CONFIGURATION **
 
-              CALL ENERGY(RXIOLD,RYIOLD,RZIOLD,I,SIGMA,VOLD,WOLD, N )
+              CALL ENERGY(RXIOLD,RYIOLD,RZIOLD,I,SIGMA,VOLD,WOLD, N, tempX, tempY, tempZ )
               
 !          ** MOVE I **
 
@@ -337,7 +352,7 @@
 
 !          ** CALCULATE THE ENERGY OF I IN THE NEW CONFIGURATION **
 
-              CALL ENERGY(RXINEW,RYINEW,RZINEW,I,SIGMA,VNEW,WNEW, N )
+              CALL ENERGY(RXINEW,RYINEW,RZINEW,I,SIGMA,VNEW,WNEW, N, tempX, tempY, tempZ )
 
 !          ** CHECK FOR ACCEPTANCE **
 
@@ -348,41 +363,29 @@
               IF ( DELTV .LE. 0.0 ) THEN
                     V      = V + DELTV
                     W      = W + DELTW
-                    RX(I)  = RXINEW
-                    RY(I)  = RYINEW
-                    RZ(I)  = RZINEW
+                    tempX(I)  = RXINEW
+                    tempY(I)  = RYINEW
+                    tempZ(I)  = RZINEW
                  ELSEIF ( EXP ( - DELTVB ) .GT. ZBQLU01(DUMM) ) THEN
                     V      = V + DELTV
                     W      = W + DELTW
-                    RX(I)  = RXINEW
-                    RY(I)  = RYINEW
-                    RZ(I)  = RZINEW
+                    tempX(I)  = RXINEW
+                    tempY(I)  = RYINEW
+                    tempZ(I)  = RZINEW
                ENDIF
-
-               ACM = ACM + 1.0
                
-!          ** CALCULATE INSTANTANEOUS VALUES **
-
-	      VN     = ( V ) / REAL ( N )
-              PRES   = DENS * TEMP + W
-
-!          ** CONVERT PRESSURE TO LJ UNITS **
-
-              PRES   = PRES * SIGMA ** 3
-
 !          *************************************************************
 !          ** ENDS LOOP OVER ATOMS                                    **
 !          *************************************************************
 
            ENDDO
            
+        RETURN   
         END
         
         
 	
-        SUBROUTINE SUMUP ( RMIN, SIGMA, OVRLAP, V, W, N )
-
-	COMMON /COORDS/ RX, RY, RZ
+        SUBROUTINE SUMUP ( SIGMA, N, V, W, tempX, tempY, tempZ )
         
 !    *******************************************************************
 !    ** CALCULATES THE TOTAL POTENTIAL ENERGY FOR A CONFIGURATION.    **
@@ -401,11 +404,9 @@
 !    ** BEGINNING AND END OF THE RUN.                                 **
 !    *******************************************************************
 
-	INTEGER     N, NMAX
-	PARAMETER   ( NMAX = 309 )
-	REAL*8,	    dimension(NMAX) :: RX, RY, RZ
-        REAL*8      SIGMA, RMIN, V, W
-        LOGICAL     OVRLAP
+	INTEGER     N
+        REAL*8      SIGMA, V, W
+	REAL*8,     dimension(N) :: tempX, tempY, tempZ
 
         REAL*8      RMINSQ, SIGSQ, RXIJ, RYIJ, RZIJ
         REAL*8      RXI, RYI, RZI, VIJ, WIJ, SR2, SR6, RIJSQ
@@ -413,8 +414,6 @@
 
 !    *******************************************************************
 
-        OVRLAP = .FALSE.
-        RMINSQ = RMIN * RMIN
         SIGSQ  = SIGMA * SIGMA
 
         V      = 0.0
@@ -423,25 +422,20 @@
 !    ** LOOP OVER ALL THE PAIRS IN THE LIQUID **
 
         DO I = 1, N - 1
-           RXI = RX(I)
-           RYI = RY(I)
-           RZI = RZ(I)
+           RXI = tempX(I)
+           RYI = tempY(I)
+           RZI = tempZ(I)
            DO J = I + 1, N
-              RXIJ  = RXI - RX(J)
-              RYIJ  = RYI - RY(J)
-              RZIJ  = RZI - RZ(J)
+              RXIJ  = RXI - tempX(J)
+              RYIJ  = RYI - tempY(J)
+              RZIJ  = RZI - tempZ(J)
               RIJSQ = RXIJ * RXIJ + RYIJ * RYIJ + RZIJ * RZIJ
-              !IF ( RIJSQ .LT. RMINSQ ) THEN
-              !   OVRLAP = .TRUE.
-              !   RETURN
-              !ELSE
-                 SR2 = SIGSQ / RIJSQ
-                 SR6 = SR2 * SR2 * SR2
-                 VIJ = SR6 * ( SR6 - 1.0 )
-                 WIJ = SR6 * ( SR6 - 0.5 )
-                 V   = V + VIJ
-                 W   = W + WIJ
-              !ENDIF
+              SR2 = SIGSQ / RIJSQ
+              SR6 = SR2 * SR2 * SR2
+              VIJ = SR6 * ( SR6 - 1.0 )
+              WIJ = SR6 * ( SR6 - 0.5 )
+              V   = V + VIJ
+              W   = W + WIJ
            ENDDO
         ENDDO
 
@@ -453,9 +447,7 @@
 
 
 
-        SUBROUTINE ENERGY ( RXI, RYI, RZI, I, SIGMA, V, W, N )
-
-        COMMON /COORDS/ RX, RY, RZ
+        SUBROUTINE ENERGY ( RXI, RYI, RZI, I, SIGMA, V, W, N, tempX, tempY, tempZ )
 
 !    *******************************************************************
 !    ** RETURNS THE POTENTIAL ENERGY OF ATOM I WITH ALL OTHER ATOMS.  **
@@ -476,10 +468,10 @@
 !    ** AFTER THE RANDOM DISPLACEMENT OF I.                           **
 !    *******************************************************************
 
-	INTEGER     N, NMAX
-	PARAMETER   ( NMAX = 309 )
-	REAL*8,	    dimension(NMAX) :: RX, RY, RZ
-        REAL*8      SIGMA, RXI, RYI, RZI, V, W
+	INTEGER     N
+        REAL*8      SIGMA, V, W
+	REAL*8,     dimension(N) :: tempX, tempY, tempZ
+        REAL*8      RXI, RYI, RZI
 	INTEGER     I
         
         REAL*8      SIGSQ, SR2, SR6
@@ -497,9 +489,9 @@
 
         DO J = 1, N
            IF ( I .NE. J ) THEN
-              RXIJ  = RXI - RX(J)
-              RYIJ  = RYI - RY(J)
-              RZIJ  = RZI - RZ(J)
+              RXIJ  = RXI - tempX(J)
+              RYIJ  = RYI - tempY(J)
+              RZIJ  = RZI - tempZ(J)
               RIJSQ = RXIJ * RXIJ + RYIJ * RYIJ + RZIJ * RZIJ
 	   
               SR2 = SIGSQ / RIJSQ
@@ -515,6 +507,65 @@
         V = 4.0 * V
         W = 48.0 * W / 3.0
 
+        RETURN
+        END
+
+        
+        SUBROUTINE READCN ( CNFILE, N, RX, RY, RZ )
+
+!    *******************************************************************
+!    ** SUBROUTINE TO READ IN THE CONFIGURATION FROM UNIT 10          **
+!    *******************************************************************
+
+	INTEGER	    N
+	REAL*8,     dimension(N) :: RX, RY, RZ
+        CHARACTER   CNFILE*(*)
+        
+        INTEGER, PARAMETER :: CNUNIT = 10
+        
+!   ********************************************************************
+
+        OPEN ( UNIT = CNUNIT, FILE = CNFILE, STATUS = 'OLD')
+
+
+        READ ( CNUNIT,* ) N
+        DO I=1, N
+           READ ( CNUNIT,* ) RX(I), RY(I), RZ(I)
+        ENDDO
+
+        CLOSE ( UNIT = CNUNIT )
+
+        RETURN
+        END
+
+
+
+        SUBROUTINE WRITCN ( SAVEFILE, N, VN, tempX, tempY, tempZ )
+        
+!    *******************************************************************
+!    ** SUBROUTINE TO WRITE OUT THE CONFIGURATION TO UNIT 10          **
+!    *******************************************************************
+
+	INTEGER	    N
+	REAL*8,     dimension(N) :: tempX, tempY, tempZ
+	CHARACTER   SAVEFILE*(*)
+        
+        INTEGER     CNUNIT
+        PARAMETER ( CNUNIT = 11 )
+        INTEGER     I
+
+!   ********************************************************************
+
+	OPEN ( UNIT = CNUNIT, FILE = SAVEFILE, STATUS = 'UNKNOWN', POSITION = 'APPEND')
+
+        WRITE ( CNUNIT, * ) N
+	WRITE ( CNUNIT, '(''V/N '',1F10.6)') VN
+	DO I=1, N
+           WRITE ( CNUNIT, * ) 'Ar ', tempX(I), tempY(I), tempZ(I)
+        ENDDO
+
+        CLOSE ( UNIT = CNUNIT )
+        
         RETURN
         END
         
@@ -753,74 +804,9 @@
 
 !***********************************************************************
 
-        SUBROUTINE READCN ( CNFILE, N )
-
-        COMMON /COORDS/ RX, RY, RZ
-
-!    *******************************************************************
-!    ** SUBROUTINE TO READ IN THE CONFIGURATION FROM UNIT 10          **
-!    *******************************************************************
-
-	INTEGER	    N, NMAX
-        PARAMETER   ( NMAX = 309 )
-	REAL*8, dimension(NMAX) :: RX, RY, RZ
-        CHARACTER   CNFILE*(*)
-        
-        INTEGER     CNUNIT
-        PARAMETER ( CNUNIT = 10 )
-        
-!   ********************************************************************
-
-        OPEN ( UNIT = CNUNIT, FILE = CNFILE, STATUS = 'OLD')
-
-
-        READ ( CNUNIT,* ) N
-        IF ( N .GT. NMAX ) STOP 'N ERROR IN READCN'
-        DO I=1, N
-           READ ( CNUNIT,* ) RX(I), RY(I), RZ(I)
-        ENDDO
-
-        CLOSE ( UNIT = CNUNIT )
-
-        RETURN
-        END
-
-
-
-        SUBROUTINE WRITCN ( SAVEFILE, N, TEMP )
-
-	COMMON /COORDS/ RX, RY, RZ
-        
-!    *******************************************************************
-!    ** SUBROUTINE TO WRITE OUT THE CONFIGURATION TO UNIT 10          **
-!    *******************************************************************
-
-	INTEGER     N, NMAX
-	PARAMETER   ( NMAX = 309 )
-        REAL*8      TEMP
-        REAL*8,     dimension(NMAX) :: RX, RY, RZ
-	CHARACTER   SAVEFILE*(*)
-        
-        INTEGER     CNUNIT
-        PARAMETER ( CNUNIT = 11 )
-        INTEGER     I
-
-!   ********************************************************************
-
-	OPEN ( UNIT = CNUNIT, FILE = SAVEFILE, STATUS = 'UNKNOWN', POSITION = 'APPEND')
-
-        WRITE ( CNUNIT, * ) N
-	WRITE ( CNUNIT, * ) 'Temp ',TEMP
-	DO I=1, N
-           WRITE ( CNUNIT, * ) 'Ar ', RX(I), RY(I), RZ(I)
-        ENDDO
-
-        CLOSE ( UNIT = CNUNIT )
-        
-        RETURN
-        END
 
 
 
 
  
+
