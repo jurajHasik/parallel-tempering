@@ -1,13 +1,17 @@
 Module LJSystem
 	
 	type LjEnsamble
-		Real*8 beta, maxDisplacement
+		Real*8 maxDisplacement
 		Real*8 V, vn, w
 		Real*8, allocatable, dimension(:) :: x,y,z
-		Integer lowerBetaId, myBetaId, higherBetaId
+
+		Real*8, allocatable, dimension(:) :: staticBetaList
+		integer, dimension(2) :: betaNeighbours
+		integer myBetaId
+		integer acceptance
 		
-		Integer, dimension(3) :: neighbourList
-		Real*8, dimension(4) :: higherBetaNeighbourStats  
+		integer, dimension(3) :: toSend, toRecieve
+		real*8, dimension(4) :: toSendReals, toRecieveReals
 	end type LjEnsamble
 
 	contains
@@ -59,7 +63,7 @@ Module LJSystem
 
               DELTV  = VNEW - VOLD
               DELTW  = WNEW - WOLD
-              DELTVB = LjEns%BETA * DELTV
+              DELTVB = LjEns%staticBetaList(LjEns%myBetaId) * DELTV
 
               IF ( DELTV .LE. 0.0 ) THEN
                     LjEns%V      = LjEns%V + DELTV
@@ -252,7 +256,7 @@ Module LJSystem
         END SUBROUTINE InitLjSystemCoords
         
 
-	SUBROUTINE InitLjSystemBeta ( LjEns, Beta, higherBetaId, myBetaId, lowerBetaId, intialMaxDisplacement )
+	SUBROUTINE InitLjSystemBeta ( LjEns, betaArray, numOfEnsambles, myId, intialMaxDisplacement )
         
 !    *******************************************************************
 !    ** Intializes LJ system of N atoms to random CONFIGURATION.      **
@@ -264,20 +268,24 @@ Module LJSystem
 !    ** THE SUBROUTINE RETURNS LJ system in random configuration      **
 !    *******************************************************************
 
-	INTEGER     N
-        Type(LjEnsamble) LjEns
-        Real*8 Beta, intialMaxDisplacement
-        Integer lowerBetaId, myBetaId, higherBetaId
-        
-        Integer I 
-
+	Type(LjEnsamble) LjEns
+        Real*8 intialMaxDisplacement	  
+	integer myId, numOfEnsambles
+	real*8, dimension(0:(numOfEnsambles-1)) :: betaArray
+	        
 !    *******************************************************************
 	
-	LjEns%Beta = Beta
 	LjEns%maxDisplacement = intialMaxDisplacement
-	LjEns%lowerBetaId = lowerBetaId
-	LjEns%myBetaId = myBetaId
-	LjEns%higherBetaId = higherBetaId 
+        allocate(LjEns%staticBetaList(0:(numOfEnsambles-1)))
+        LjEns%staticBetaList = betaArray
+        LjEns%myBetaId = myId
+        LjEns%betaNeighbours(1) = myId-1
+        LjEns%betaNeighbours(2) = myId+1
+        LjEns%acceptance = 0
+        
+        LjEns%toSend(1) = LjEns%myBetaId
+        LjEns%toSend(2) = LjEns%betaNeighbours(1)
+        LjEns%toSend(3) = LjEns%betaNeighbours(2)
         
         RETURN
         END subroutine InitLjSystemBeta

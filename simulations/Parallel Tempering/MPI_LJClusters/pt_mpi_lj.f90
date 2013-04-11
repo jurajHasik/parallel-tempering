@@ -8,14 +8,13 @@ include 'mpif.h'
 
 !===================================================================================
 character charMyId*2
+character charMyBetaId*2
 character charNumberOfAtoms*3
 
 integer i
 
-REAL*8 DRMAX
-
 Type(LjEnsamble) LjEns
-Real*8 initialBeta
+Real*8, allocatable, dimension(:) :: betaArray
 
 ! ** Diagnostic variables **
 
@@ -51,7 +50,7 @@ if(myId.eq.0) then
 end if
 
 ! ** Initialize PRNG **
-call rmaset(-6,10,1,myId,'nexiste.pa')
+call rmaset(-6,10,1,(47*myId+1),'nexiste.pa')
 
 write(charMyId,'(I2.2)') myId
 open(6,file="ranGenTest"//charMyId//".dat", form="formatted", status="unknown")
@@ -59,14 +58,17 @@ write(6,'("LjEnsamble - governed by process with Id = ",I2)') myId
 close(6)
 
 ! ** Initialze LJ Ensamble **
-initialBeta = 1/(minTemp+dble(myId)*(maxTemp-minTemp)/dble(numProcesses))
-call InitLjSystemBeta( LjEns, initialBeta, (myId-1), myId, (myId+1), sigma)
+allocate(betaArray(0:(numProcesses-1)))
+do i=0, numProcesses-1
+  betaArray(i) = 1/(minTemp+dble(numProcesses-1-i)*(maxTemp-minTemp)/dble(numProcesses-1))
+end do
+call InitLjSystemBeta( LjEns, betaArray, numProcesses, myId, sigma)
 call InitLjSystemCoords( numberOfAtoms, LjEns )
 
 ! ** Log initial values to separate coressponding file **
 open(6,file="ranGenTest"//charMyId//".dat", form="formatted", status="old", access="append")
-write(6,'("Beta temperature = ",F10.5)') LjEns%Beta
-write(6,'("Initial indexes by Beta Temperature: ",I2,"  ",I2,"  ",I2," [colder - my index - hotter]")') LjEns%higherBetaId, LjEns%myBetaId, LjEns%lowerBetaId
+write(6,'("Beta temperature = ",F10.5)') LjEns%staticBetaList(LjEns%myBetaId)
+write(6,'("Initial indexes for Neighbours [in Beta Temperature]: ",I2,"  ",I2," [hotter - colder]")') LjEns%betaNeighbours(1), LjEns%betaNeighbours(2)
 write(6,'("Initial Coordinates for N = ",I3," atoms")') numberOfAtoms
   do i=1, numberOfAtoms
     write(6,'(3F10.5)') LjEns%X(i), LjEns%Y(i), LjEns%Z(i)
@@ -86,17 +88,42 @@ write(6,'("Maximal displacement after initial equilibriation = ",F10.5)') LjEns%
 close(6)
 
 ! ** 
-call tryReplicaSwap( LjEns, myId, numProcesses )
+call tryReplicaSwap( LjEns, numProcesses, 0 )
+write(charMyBetaId,'(I2.2)') LjEns%myBetaId
 open(6,file="ranGenTest"//charMyId//".dat", form="formatted", status="old", access="append")
-write(6,'("Extended Neighbour list: ",I2," ",I2," ",I2)') LjEns%neighbourList(1), LjEns%neighbourList(2), LjEns%neighbourList(3) 
-write(6,'("Energy and Beta of higherBeta LjSystem: ",F10.5," ",F10.5)' ) LjEns%higherBetaNeighbourStats(1), LjEns%higherBetaNeighbourStats(2)
+write(6,'("New Beta = ",F10.5)') LjEns%staticBetaList(LjEns%myBetaId)
+write(6,'("New indexes for Neighbours [in Beta Temperature]: ",I2," ",I2," ",I2," [hotter - myBetaId - colder]")') LjEns%betaNeighbours(1), LjEns%myBetaId, LjEns%betaNeighbours(2)
+close(6)
+
+! **test**
+do i=1, 10000
+  call sweepOverReplica( numberOfAtoms, sigma, LjEns )
+  if (mod(i,1000) .eq. 0) then
+    call tryReplicaSwap( LjEns, numProcesses, mod(i,3) )
+    open(6,file="ranGenTest"//charMyId//".dat", form="formatted", status="old", access="append")
+    write(6,'("New Beta = ",F10.5)') LjEns%staticBetaList(LjEns%myBetaId)
+    write(6,'("New indexes for Neighbours [in Beta Temperature]: ",I2," ",I2," ",I2," [hotter - myBetaId - colder]")') LjEns%betaNeighbours(1), LjEns%myBetaId, LjEns%betaNeighbours(2)
+    close(6)
+  endif
+end do
+
+!open(6,file="ranGenTest"//charMyId//".dat", form="formatted", status="old", access="append")
+!write(6,'("New Beta = ",F10.5)') LjEns%staticBetaList(LjEns%myBetaId)
+!write(6,'("New indexes for Neighbours [in Beta Temperature]: ",I2," ",I2," ",I2," [hotter - myBetaId - colder]")') LjEns%betaNeighbours(1), LjEns%myBetaId, LjEns%betaNeighbours(2)
+!close(6)
+
+call energyOfSystem( sigma, numberOfAtoms, LjEns)
+! ** log data after initial equilibriation **
+open(6,file="ranGenTest"//charMyId//".dat", form="formatted", status="old", access="append")
+write(6,'("Energy after initial equilibriation = ",F10.5)') LjEns%V
+write(6,'("Maximal displacement after initial equilibriation = ",F10.5)') LjEns%maxDisplacement
 close(6)
 
 call MPI_FINALIZE(ierr)
 
 end
 
-SUBROUTINE tryReplicaSwap ( LjEns, myId, numProcesses )
+SUBROUTINE tryReplicaSwap ( LjEns, numProcesses, offset )
         
 !    *******************************************************************
 !    ** Attepmts an exchange of Beta temperatures                     **
@@ -109,66 +136,98 @@ SUBROUTINE tryReplicaSwap ( LjEns, myId, numProcesses )
       include 'mpif.h'
       
       Type(LjEnsamble) LjEns
-      integer myId, numProcesses
+      integer numProcesses, offset
       
-      integer itag
-      integer, dimension(3) :: toSend, toRecieve
-      real*8, dimension(4) :: toSendReals, toRecieveReals
+      integer itag, itagReal
       integer status(MPI_STATUS_SIZE)
       
-      logical swapSuccess
-      
+      !real*8 rmafun
+      logical mcCriterionForReplicaSwap
+      integer my_ind1, my_ind2, my_ind3
+      integer ndest3l, nsend3l, ndest3r, nsend3r, ndest1, NRECV3R, NRECV3L
+            
 !    *******************************************************************
+      call MPI_COMM_RANK(MPI_COMM_WORLD, myId, ierr)
+      
+      itag=3
+      write(*, '("iTag: ",I5)') itag
+      itagReal=2
+      !itag = 1
+      MY_IND1=MOD(LjEns%myBetaId,3)
+      MY_IND2=MOD(LjEns%myBetaId+2,3) ! MY_B-1+3
+      MY_IND3=MOD(LjEns%myBetaId+1,3) ! MY_B-2+3
 
-!	** Create local list of neighbours [2 colder, this process, 1 hotter]
-	LjEns%neighbourList(2) = LjEns%higherBetaId
-	LjEns%neighbourList(3) = LjEns%lowerBetaId
-	
-	itag = 1
-	if (LjEns%myBetaId .ne. (numProcesses-1) ) then
-	  toSend(1) = LjEns%higherBetaId 
-	  call MPI_SEND(toSend, 1, MPI_INTEGER, LjEns%lowerBetaId, itag, MPI_COMM_WORLD, ierr)
-	endif
-	if (LjEns%myBetaId .ne. 0) then
-	  call MPI_RECV(toRecieve, 1, MPI_INTEGER, LjEns%higherBetaId, itag, MPI_COMM_WORLD, status, ierr)
-	  LjEns%neighbourList(1) = toRecieve(1)
-	endif
-	
-!	** Send energy and beta to process with lowerBeta ["hotter"] ** 
-	itag = 2
-	if (LjEns%myBetaId .ne. (numProcesses-1) ) then
-	  toSendReals(1) = LjEns%V
-	  toSendReals(2) = LjEns%beta
-	  toSendReals(3) = LjEns%maxDisplacement
-	  call MPI_SEND(toSendReals, 3, MPI_REAL8, LjEns%lowerBetaId, itag, MPI_COMM_WORLD, ierr)
-	endif
-	if (LjEns%myBetaId .ne. 0) then
-	  call MPI_RECV(toRecieveReals, 3, MPI_REAL8, LjEns%higherBetaId, itag, MPI_COMM_WORLD, status, ierr)
-	  LjEns%higherBetaNeighbourStats(1) = toRecieveReals(1)
-	  LjEns%higherBetaNeighbourStats(2) = toRecieveReals(2)
-	  LjEns%higherBetaNeighbourStats(3) = toRecieveReals(3)
-        endif
+      IF(MY_IND1.EQ.offset) THEN ! Processes MY_IND1.
+        NDEST3L=LjEns%betaNeighbours(1)
+        NSEND3L=-2
         
-        swapSuccess = .false.
-!       ** Attempt swapping the replicas [called by "hotter" replica] **
-	if(LjEns%myBetaId .ne. 0) then
-	  swapSuccess = mcCriterionForReplicaSwap(LjEns%higherBetaNeighbourStats(2), LjEns%beta, LjEns%higherBetaNeighbourStats(1), LjEns%V)
-        endif
+        IF(LjEns%betaNeighbours(2).LT.numProcesses) THEN
+          LjEns%toSend(1)=LjEns%betaNeighbours(1)
+          LjEns%toSend(2)=0 ! iact *former energy*
+	  LjEns%toSend(3)=LjEns%acceptance
+          LjEns%toSendReals(1) = LjEns%V
+          
+          CALL MPI_SEND(LjEns%toSend,3,MPI_INTEGER,LjEns%betaNeighbours(2),itag,MPI_COMM_WORLD,IERR)
+          CALL MPI_SEND(LjEns%toSendReals,1,MPI_REAL8,LjEns%betaNeighbours(2),itagReal,MPI_COMM_WORLD,IERR)
+          CALL MPI_RECV(LjEns%toRecieve,2,MPI_INTEGER,LjEns%betaNeighbours(2),itag,MPI_COMM_WORLD,STATUS,IERR)
+          
+          IF(LjEns%toRecieve(1).NE.-2) THEN
+            NSEND3L=LjEns%betaNeighbours(2)
+            LjEns%betaNeighbours(1)=LjEns%betaNeighbours(2)
+            LjEns%betaNeighbours(2)=LjEns%toRecieve(1)
+            LjEns%acceptance=LjEns%toRecieve(2) !**acceptance rate
+            LjEns%myBetaId=LjEns%myBetaId+1
+          END IF
         
-        if( swapSuccess ) then
-	 ! ** Send my values to "colder" replica ** 
-	  toSendReals(1) = LjEns%V
-	  toSendReals(2) = LjEns%beta
-	  toSendReals(3) = LjEns%maxDisplacement
-	  call MPI_SEND(toSendReals, 3, MPI_REAL8, LjEns%higherBetaId, itag, MPI_COMM_WORLD, ierr)
-	  if (myId .eq. )
-	  call MPI_RECV(toRecieveReals, 3, MPI_REAL8, LjEns%lowerBetaId, itag, MPI_COMM_WORLD, status, ierr)
-	  LjEns%V = toRecieveReals(1)
-	  LjEns%beta = toRecieveReals(2)
-	  LjEns%maxDisplacement = toRecieveReals(3)
-        endif
+        END IF
+        IF(NDEST3L.GE.0) then
+	  CALL MPI_SEND(NSEND3L,1,MPI_INTEGER,NDEST3L, itag,MPI_COMM_WORLD,IERR)
+	end if
+      END IF
+
+      IF(MY_IND2.EQ.offset) THEN ! Processes MY_IND2.
+        NDEST3R=LjEns%betaNeighbours(2)
+        NSEND3R=-2
         
-        RETURN
+        IF(LjEns%betaNeighbours(1).GE.0) THEN
+          CALL MPI_RECV(LjEns%toRecieve,3,MPI_INTEGER,LjEns%betaNeighbours(1),itag, MPI_COMM_WORLD,STATUS,IERR)
+          CALL MPI_RECV(LjEns%toRecieveReals,1,MPI_REAL8,LjEns%betaNeighbours(1),itagReal, MPI_COMM_WORLD,STATUS,IERR)
+          
+          NDEST1=LjEns%betaNeighbours(1)
+          
+          IF(mcCriterionForReplicaSwap(LjEns%staticBetaList(LjEns%myBetaId),LjEns%staticBetaList(LjEns%myBetaId-1),LjEns%V,LjEns%toRecieveReals(1))) THEN
+          !if(rmafun() .gt. 0.5 ) then
+	    write(*,'("SWAP! ",I2)') myId
+            LjEns%toSend(1)=LjEns%betaNeighbours(2)
+            LjEns%toSend(2)=LjEns%acceptance+1
+            LjEns%acceptance=LjEns%toRecieve(3)
+            NSEND3R=LjEns%betaNeighbours(1)
+            LjEns%betaNeighbours(2)=LjEns%betaNeighbours(1)
+            LjEns%betaNeighbours(1)=LjEns%toRecieve(1)
+            LjEns%myBetaId=LjEns%myBetaId-1
+          ELSE
+            LjEns%toSend(1)=-2
+          END IF
+          
+          CALL MPI_SEND(LjEns%toSend,2,MPI_INTEGER,NDEST1,itag, MPI_COMM_WORLD,IERR)
+        END IF
+        IF(NDEST3R.LT.numProcesses) then
+	  CALL MPI_SEND(NSEND3R,1,MPI_INTEGER, NDEST3R,itag,MPI_COMM_WORLD,IERR)
+	end if
+      END IF
+
+      IF(MY_IND3.EQ.offset) THEN ! Processes MY_IND3.
+        IF(LjEns%betaNeighbours(1).GE.0) THEN
+          CALL MPI_RECV(NRECV3R,1,MPI_INTEGER,LjEns%betaNeighbours(1), itag,MPI_COMM_WORLD,STATUS,IERR)
+          IF(NRECV3R.NE.-2) LjEns%betaNeighbours(1)=NRECV3R
+        END IF
+        IF(LjEns%betaNeighbours(2).LT.numProcesses) THEN
+          CALL MPI_RECV(NRECV3L,1,MPI_INTEGER,LjEns%betaNeighbours(2), itag,MPI_COMM_WORLD,STATUS,IERR)
+          IF(NRECV3L.NE.-2) LjEns%betaNeighbours(2)=NRECV3L
+        END IF
+      END IF
+
+      RETURN
 END subroutine tryReplicaSwap
 
 FUNCTION mcCriterionForReplicaSwap( higherBeta, lowerBeta, lowerEnergy, higherEnergy ) 
@@ -180,6 +239,8 @@ FUNCTION mcCriterionForReplicaSwap( higherBeta, lowerBeta, lowerEnergy, higherEn
 !    **                                                               **
 !    **								      **
 !    *******************************************************************
+	real*8 higherBeta, lowerBeta, lowerEnergy, higherEnergy
+	
 	real*8 delta
 
 	mcCriterionForReplicaSwap = .false.
